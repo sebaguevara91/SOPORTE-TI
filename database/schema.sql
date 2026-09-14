@@ -30,8 +30,10 @@ CREATE TABLE IF NOT EXISTS visitas (
     estado VARCHAR(20) NOT NULL DEFAULT 'Pendiente' CHECK (estado IN ('Pendiente', 'En Proceso', 'Realizada', 'Programada')),
     tipo_soporte VARCHAR(100) NOT NULL DEFAULT 'Soporte Correctivo',
     prioridad VARCHAR(20) NOT NULL DEFAULT 'Media' CHECK (prioridad IN ('Baja', 'Media', 'Alta', 'Urgente')),
-    fecha_programada DATE NOT NULL,
-    fecha_realizada TIMESTAMP NULL,
+    fecha_solicitud DATE NOT NULL,
+    fecha_atencion TIMESTAMP NULL,
+    fecha_programada DATE NULL, -- Retrocompatibilidad
+    fecha_realizada TIMESTAMP NULL, -- Retrocompatibilidad
     motivo TEXT NOT NULL,
     detalle_hardware TEXT, -- JSON con detalle de equipos (APs, switches, impresoras, etc.)
     seguimiento_bitacora TEXT, -- JSON Array con bitácora de notas: [{"fecha": "...", "autor": "...", "nota": "..."}]

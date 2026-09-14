@@ -579,14 +579,15 @@
                 <th class="px-4 py-3.5">Establecimiento</th>
                 <th class="px-4 py-3.5">Técnico Resp.</th>
                 <th class="px-4 py-3.5">Categoría Soporte</th>
-                <th class="px-4 py-3.5 cursor-pointer select-none hover:bg-slate-100 transition group" onclick="toggleOrdenVisitasFecha()" title="Clic para alternar orden por fecha">
+                <th class="px-4 py-3.5 cursor-pointer select-none hover:bg-slate-100 transition group" onclick="toggleOrdenVisitasFecha()" title="Clic para alternar orden por fecha de solicitud">
                   <div class="flex items-center space-x-1.5">
-                    <span>Fecha</span>
+                    <span>F. Solicitud</span>
                     <span id="th-visita-fecha-indicador" class="text-blue-600 inline-flex items-center">
                       <i data-lucide="arrow-down-wide-narrow" class="w-3.5 h-3.5"></i>
                     </span>
                   </div>
                 </th>
+                <th class="px-4 py-3.5">F. Atención</th>
                 <th class="px-4 py-3.5">Estado</th>
                 <th class="px-4 py-3.5">Motivo / Equipos</th>
                 <th class="px-4 py-3.5 text-right">Acciones</th>
@@ -797,14 +798,15 @@
           <table class="min-w-full divide-y divide-slate-200 text-xs text-left">
             <thead class="bg-slate-50 font-bold text-slate-600 uppercase tracking-wider">
               <tr>
-                <th class="px-4 py-3">ID</th>
-                <th class="px-4 py-3">Establecimiento</th>
-                <th class="px-4 py-3">Técnico</th>
-                <th class="px-4 py-3">Categoría</th>
-                <th class="px-4 py-3">Fecha Prog.</th>
-                <th class="px-4 py-3">Estado</th>
-                <th class="px-4 py-3">Recepción / Firma</th>
-                <th class="px-4 py-3 text-right">Acta</th>
+                <th class="px-3 py-3">ID</th>
+                <th class="px-3 py-3">Establecimiento</th>
+                <th class="px-3 py-3">Técnico</th>
+                <th class="px-3 py-3">Categoría</th>
+                <th class="px-3 py-3">F. Solicitud</th>
+                <th class="px-3 py-3">F. Atención</th>
+                <th class="px-3 py-3">Estado</th>
+                <th class="px-3 py-3">Recepción / Firma</th>
+                <th class="px-3 py-3 text-right">Acta</th>
               </tr>
             </thead>
             <tbody id="tabla-reporte-body" class="divide-y divide-slate-200">
@@ -892,15 +894,18 @@
             </select>
           </div>
           <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Fecha Programada *</label>
-            <input type="date" id="form-visita-fecha" required class="w-full text-xs sm:text-sm border border-slate-300 rounded-lg p-2.5">
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+              <span>Fecha de Solicitud *</span>
+              <span class="text-[10px] font-normal text-blue-600 font-sans normal-case">Requerimiento</span>
+            </label>
+            <input type="date" id="form-visita-fecha" required class="w-full text-xs sm:text-sm border border-slate-300 rounded-lg p-2.5 font-medium focus:ring-2 focus:ring-blue-500">
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Estado *</label>
-            <select id="form-visita-estado" class="w-full text-xs sm:text-sm border border-slate-300 rounded-lg p-2.5 bg-white font-medium">
+            <select id="form-visita-estado" onchange="actualizarVisibilidadFechaAtencionForm()" class="w-full text-xs sm:text-sm border border-slate-300 rounded-lg p-2.5 bg-white font-medium">
               <option value="Pendiente">Pendiente</option>
               <option value="En Proceso">En Proceso</option>
               <option value="Realizada">Realizada</option>
@@ -928,6 +933,15 @@
               <option value="Baja">Baja</option>
             </select>
           </div>
+        </div>
+
+        <!-- CAMPO CONDICIONAL: FECHA DE ATENCIÓN (EN PROCESO / REALIZADA) -->
+        <div id="form-visita-contenedor-fecha-atencion" class="hidden p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1">
+          <label class="block text-xs font-bold text-emerald-900 uppercase flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><i data-lucide="calendar-check" class="w-4 h-4 text-emerald-600"></i> Fecha de Atención</span>
+            <span class="text-[10px] text-emerald-700 font-normal">Caso en gestión o resuelto</span>
+          </label>
+          <input type="date" id="form-visita-fecha-atencion" class="w-full text-xs sm:text-sm border border-emerald-300 rounded-lg p-2.5 bg-white font-semibold text-slate-800">
         </div>
 
         <div>
@@ -977,23 +991,38 @@
             <span id="seg-tecnico" class="font-medium text-slate-800">--</span>
           </div>
           <div class="flex justify-between items-center">
+            <span class="font-bold text-slate-500 uppercase">Fecha de Solicitud:</span>
+            <span id="seg-fecha-solicitud" class="font-mono font-bold text-blue-700">--</span>
+          </div>
+          <div class="flex justify-between items-center">
             <span class="font-bold text-slate-500 uppercase">Motivo Requerimiento:</span>
             <span id="seg-motivo" class="text-slate-700 max-w-md text-right">--</span>
           </div>
         </div>
 
-        <!-- CAMBIO RÁPIDO DE ESTADO -->
-        <div class="bg-blue-50/50 p-3.5 rounded-xl border border-blue-200 space-y-2">
-          <label class="block text-xs font-bold text-blue-900 uppercase">Estado Actual de la Atención</label>
-          <div class="flex items-center gap-2">
-            <select id="seg-estado" class="flex-1 text-xs sm:text-sm border border-blue-300 rounded-lg p-2.5 bg-white font-bold text-slate-800">
-              <option value="Pendiente">🟡 Pendiente (Pausada / Falta repuesto)</option>
-              <option value="En Proceso">🔵 En Proceso (Técnico en terreno)</option>
-              <option value="Realizada">🟢 Realizada (Finalizada con conformidad)</option>
-              <option value="Programada">🟣 Programada</option>
-            </select>
-            <button type="button" onclick="guardarCambioEstadoSeguimiento()" class="px-3.5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow">
-              Actualizar Estado
+        <!-- CAMBIO RÁPIDO DE ESTADO & FECHA DE ATENCIÓN -->
+        <div class="bg-blue-50/50 p-3.5 rounded-xl border border-blue-200 space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-blue-900 uppercase mb-1">Estado de la Atención</label>
+              <select id="seg-estado" onchange="alCambiarEstadoSeguimiento()" class="w-full text-xs sm:text-sm border border-blue-300 rounded-lg p-2.5 bg-white font-bold text-slate-800">
+                <option value="Pendiente">🟡 Pendiente (Pausada / Falta repuesto)</option>
+                <option value="En Proceso">🔵 En Proceso (Técnico en terreno)</option>
+                <option value="Realizada">🟢 Realizada (Finalizada con conformidad)</option>
+                <option value="Programada">🟣 Programada</option>
+              </select>
+            </div>
+            <div id="seg-contenedor-fecha-atencion">
+              <label class="block text-xs font-bold text-emerald-900 uppercase mb-1 flex items-center justify-between">
+                <span>Fecha de Atención</span>
+                <span class="text-[10px] text-emerald-700 font-normal">Gestión / Cierre</span>
+              </label>
+              <input type="date" id="seg-fecha-atencion" class="w-full text-xs sm:text-sm border border-emerald-300 rounded-lg p-2.5 bg-white font-bold text-slate-800">
+            </div>
+          </div>
+          <div class="flex justify-end pt-1">
+            <button type="button" onclick="guardarCambioEstadoSeguimiento()" class="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow cursor-pointer transition">
+              Actualizar Estado y Fecha
             </button>
           </div>
         </div>
@@ -1433,6 +1462,8 @@
             <p><strong class="text-slate-600">Correo Director(a):</strong> <span id="acta-correo">--</span></p>
             <p><strong class="text-slate-600">Técnico TI Asignado:</strong> <span id="acta-tecnico" class="font-bold text-blue-700">--</span></p>
             <p><strong class="text-slate-600">Tipo de Atención:</strong> <span id="acta-tipo-soporte" class="font-semibold">--</span></p>
+            <p><strong class="text-slate-600">Fecha Solicitud:</strong> <span id="acta-fecha-solicitud" class="font-mono font-bold text-blue-700">--</span></p>
+            <p><strong class="text-slate-600">Fecha Atención:</strong> <span id="acta-fecha-atencion" class="font-mono font-bold text-emerald-700">--</span></p>
           </div>
         </div>
 
@@ -1523,6 +1554,8 @@
         estado: "Realizada",
         tipo_soporte: "Problemas de Conectividad",
         prioridad: "Alta",
+        fecha_solicitud: "2026-08-15",
+        fecha_atencion: "2026-08-15 16:30:00",
         fecha_programada: "2026-08-15",
         fecha_realizada: "2026-08-15 16:30:00",
         motivo: "Mantenimiento preventivo e instalación de puntos de acceso Wi-Fi para laboratorios.",
@@ -1546,6 +1579,8 @@
         estado: "Pendiente",
         tipo_soporte: "Soporte Correctivo",
         prioridad: "Urgente",
+        fecha_solicitud: "2026-08-20",
+        fecha_atencion: null,
         fecha_programada: "2026-08-20",
         fecha_realizada: null,
         motivo: "Falla en enlace de fibra óptica interior y conmutación de switch de distribución de administración.",
@@ -1569,6 +1604,8 @@
         estado: "En Proceso",
         tipo_soporte: "Problemas de Conectividad",
         prioridad: "Media",
+        fecha_solicitud: "2026-09-01",
+        fecha_atencion: "2026-09-01",
         fecha_programada: "2026-09-01",
         fecha_realizada: null,
         motivo: "Revisión semestral de infraestructura tecnológica, rack principal y auditoría de red de laboratorios.",
@@ -1591,6 +1628,8 @@
         estado: "Programada",
         tipo_soporte: "Impresoras y Periféricos",
         prioridad: "Baja",
+        fecha_solicitud: "2026-09-05",
+        fecha_atencion: null,
         fecha_programada: "2026-09-05",
         fecha_realizada: null,
         motivo: "Instalación y configuración de 2 impresoras multifuncionales en sala de profesores y enlace a red docente.",
@@ -1844,26 +1883,16 @@
           if (resVis.ok) {
             const dataVis = await resVis.json();
             if (dataVis && dataVis.length > 0) {
-              visitas = dataVis;
-            } else {
-              // Si la API tiene 0 visitas pero localStorage tenía datos, restaurar y sincronizar hacia la base de datos
-              const visLocal = localStorage.getItem('soporte_ti_visitas');
-              if (visLocal) {
-                try {
-                  const parsed = JSON.parse(visLocal);
-                  if (parsed && parsed.length > 0) {
-                    visitas = parsed;
-                    fetch(`${API_BASE}/api/visitas/bulk`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(visitas)
-                    }).catch(e => console.error(e));
-                  }
-                } catch(e) {}
-              }
+              visitas = dataVis.map(v => ({
+                ...v,
+                fecha_solicitud: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
+                fecha_atencion: v.estado === 'Pendiente' ? null : (v.fecha_atencion || v.fecha_realizada || null),
+                fecha_programada: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
+                fecha_realizada: (v.estado !== 'Pendiente' && (v.fecha_atencion || v.fecha_realizada)) ? (v.fecha_atencion || v.fecha_realizada) : null
+              }));
             }
           }
-          // Siempre mantener respaldo en localStorage
+          // Mantener respaldo en localStorage
           localStorage.setItem('soporte_ti_establecimientos', JSON.stringify(establecimientos));
           localStorage.setItem('soporte_ti_visitas', JSON.stringify(visitas));
           return;
@@ -1872,7 +1901,7 @@
         }
       }
 
-      // 2. Modo Autónomo LocalStorage
+      // 2. Modo Autónomo LocalStorage / Fallback
       apiDisponible = false;
       const badge = document.getElementById('badge-modo-conexion');
       if (badge) {
@@ -1895,7 +1924,18 @@
 
       if (visLocal) {
         try {
-          visitas = JSON.parse(visLocal);
+          const parsed = JSON.parse(visLocal);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            visitas = parsed.map(v => ({
+              ...v,
+              fecha_solicitud: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
+              fecha_atencion: v.estado === 'Pendiente' ? null : (v.fecha_atencion || v.fecha_realizada || null),
+              fecha_programada: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
+              fecha_realizada: (v.estado !== 'Pendiente' && (v.fecha_atencion || v.fecha_realizada)) ? (v.fecha_atencion || v.fecha_realizada) : null
+            }));
+          } else {
+            visitas = JSON.parse(JSON.stringify(SEED_VISITAS));
+          }
         } catch (e) {
           visitas = JSON.parse(JSON.stringify(SEED_VISITAS));
         }
@@ -2033,7 +2073,7 @@
               <p class="text-xs text-slate-600 mt-2 line-clamp-2 bg-white p-2 rounded border border-slate-100">${v.motivo}</p>
             </div>
             <div class="pt-2 border-t border-slate-200 flex justify-between items-center text-[11px]">
-              <span class="text-slate-500 font-medium">📅 ${v.fecha_programada}</span>
+              <span class="text-slate-500 font-medium">📅 Solicitud: <strong class="text-slate-700 font-mono">${v.fecha_solicitud || v.fecha_programada || '--'}</strong></span>
               <button onclick="abrirModalSeguimiento(${v.id})" class="font-bold text-blue-600 hover:text-blue-800">
                 Gestionar &rarr;
               </button>
@@ -2286,10 +2326,10 @@
         return matchBusqueda && matchEstado && matchTipo && matchPrio;
       });
 
-      // Ordenar por fecha programada (o fecha realizada) y desempate por id
+      // Ordenar por fecha de solicitud (o fecha de atención) y desempate por id
       filtradas.sort((a, b) => {
-        const fechaA = (a.fecha_programada || a.fecha_realizada || '').trim();
-        const fechaB = (b.fecha_programada || b.fecha_realizada || '').trim();
+        const fechaA = (a.fecha_solicitud || a.fecha_programada || a.fecha_atencion || a.fecha_realizada || '').trim();
+        const fechaB = (b.fecha_solicitud || b.fecha_programada || b.fecha_atencion || b.fecha_realizada || '').trim();
 
         if (fechaA && fechaB && fechaA !== fechaB) {
           return ordenVisitasFecha === 'desc'
@@ -2317,7 +2357,7 @@
       tbody.innerHTML = '';
 
       if (lista.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400 text-xs">No se encontraron visitas con los filtros aplicados.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400 text-xs">No se encontraron visitas con los filtros aplicados.</td></tr>`;
         return;
       }
 
@@ -2337,6 +2377,17 @@
         const badgeClass = `badge-${v.estado.replace(/\s+/g, '_')}`;
         const prioClass = `badge-prio-${v.prioridad || 'Media'}`;
 
+        const fSolicitud = v.fecha_solicitud || v.fecha_programada || '--';
+        let fAtencionHtml = '';
+        const fAteVal = v.fecha_atencion || v.fecha_realizada;
+        if (fAteVal) {
+          fAtencionHtml = `<span class="font-mono font-bold text-emerald-700">${fAteVal.substring(0, 10)}</span>`;
+        } else if (v.estado === 'Pendiente') {
+          fAtencionHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">Pendiente</span>`;
+        } else {
+          fAtencionHtml = `<span class="text-slate-400 font-mono">--</span>`;
+        }
+
         tr.innerHTML = `
           <td class="px-4 py-3">
             <span class="font-mono font-bold text-slate-800">#${v.id}</span>
@@ -2350,7 +2401,8 @@
           <td class="px-4 py-3">
             <span class="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium">${v.tipo_soporte || 'General'}</span>
           </td>
-          <td class="px-4 py-3 text-slate-600 font-mono">${v.fecha_programada}</td>
+          <td class="px-4 py-3 text-slate-700 font-mono font-semibold">${fSolicitud}</td>
+          <td class="px-4 py-3">${fAtencionHtml}</td>
           <td class="px-4 py-3">
             <span class="px-2.5 py-1 rounded-full font-bold ${badgeClass}">
               ${v.estado}
@@ -2401,6 +2453,7 @@
           const card = document.createElement('div');
           card.className = "bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition space-y-2 text-xs";
           const prioClass = `badge-prio-${v.prioridad || 'Media'}`;
+          const fAteVal = v.fecha_atencion || v.fecha_realizada;
 
           card.innerHTML = `
             <div class="flex justify-between items-center">
@@ -2412,6 +2465,10 @@
               <p class="text-[11px] text-slate-500">${v.tipo_soporte || 'Soporte'}</p>
             </div>
             <p class="text-slate-600 line-clamp-2 bg-slate-50 p-2 rounded border border-slate-100">${v.motivo}</p>
+            <div class="text-[11px] text-slate-500 space-y-0.5 pt-1">
+              <div>📅 Solicitud: <span class="font-mono font-semibold text-slate-700">${v.fecha_solicitud || v.fecha_programada || '--'}</span></div>
+              ${fAteVal ? `<div>🛠️ Atención: <span class="font-mono font-bold text-emerald-700">${fAteVal.substring(0, 10)}</span></div>` : ''}
+            </div>
             <div class="pt-2 border-t border-slate-100 flex justify-between items-center text-[11px] text-slate-500">
               <span>👤 ${v.tecnico_responsable}</span>
               <div class="flex items-center space-x-1">
@@ -2575,6 +2632,23 @@
     });
 
     // FORMULARIO NUEVA / EDITAR VISITA
+    function actualizarVisibilidadFechaAtencionForm() {
+      const estado = document.getElementById('form-visita-estado').value;
+      const contenedorAte = document.getElementById('form-visita-contenedor-fecha-atencion');
+      const inputAte = document.getElementById('form-visita-fecha-atencion');
+      if (contenedorAte) {
+        if (estado === 'En Proceso' || estado === 'Realizada') {
+          contenedorAte.classList.remove('hidden');
+          if (!inputAte.value) {
+            inputAte.value = new Date().toISOString().split('T')[0];
+          }
+        } else {
+          contenedorAte.classList.add('hidden');
+          inputAte.value = '';
+        }
+      }
+    }
+
     function abrirModalNuevaVisita(rbdPreseleccionado = null) {
       document.getElementById('modal-visita-titulo').innerHTML = `<i data-lucide="calendar-plus" class="w-5 h-5 text-blue-400"></i><span>Registrar Nueva Visita Técnica TI</span>`;
       document.getElementById('form-visita-id').value = '';
@@ -2588,6 +2662,8 @@
       document.getElementById('form-visita-tecnico').value = 'Sebastian Guevara';
       document.getElementById('form-visita-fecha').value = new Date().toISOString().split('T')[0];
       document.getElementById('form-visita-estado').value = 'Pendiente';
+      document.getElementById('form-visita-fecha-atencion').value = '';
+      actualizarVisibilidadFechaAtencionForm();
       document.getElementById('form-visita-tipo').value = 'Soporte Correctivo';
       document.getElementById('form-visita-prioridad').value = 'Media';
       document.getElementById('form-visita-motivo').value = '';
@@ -2607,8 +2683,10 @@
 
       const tecnicosValidos = ["Sebastian Guevara", "Rodrigo Bravo", "Claudio Rojas"];
       document.getElementById('form-visita-tecnico').value = tecnicosValidos.includes(v.tecnico_responsable) ? v.tecnico_responsable : 'Sebastian Guevara';
-      document.getElementById('form-visita-fecha').value = v.fecha_programada || '';
+      document.getElementById('form-visita-fecha').value = v.fecha_solicitud || v.fecha_programada || '';
       document.getElementById('form-visita-estado').value = v.estado || 'Pendiente';
+      document.getElementById('form-visita-fecha-atencion').value = (v.fecha_atencion || v.fecha_realizada || '').substring(0, 10);
+      actualizarVisibilidadFechaAtencionForm();
       document.getElementById('form-visita-tipo').value = v.tipo_soporte || 'Soporte Correctivo';
       document.getElementById('form-visita-prioridad').value = v.prioridad || 'Media';
       document.getElementById('form-visita-motivo').value = v.motivo || '';
@@ -2631,11 +2709,23 @@
       const rbd = parseInt(rbdRaw);
       const est = establecimientos.find(e => e.rbd === rbd);
 
+      const fSolicitud = document.getElementById('form-visita-fecha').value;
+      const estado = document.getElementById('form-visita-estado').value;
+      let fAtencion = document.getElementById('form-visita-fecha-atencion').value || null;
+      if (estado === 'Pendiente') {
+        fAtencion = null;
+      } else if (estado === 'Realizada' && !fAtencion) {
+        fAtencion = fSolicitud;
+      }
+
       const payload = {
         rbd: rbd,
         tecnico_responsable: document.getElementById('form-visita-tecnico').value,
-        fecha_programada: document.getElementById('form-visita-fecha').value,
-        estado: document.getElementById('form-visita-estado').value,
+        fecha_solicitud: fSolicitud,
+        fecha_atencion: fAtencion,
+        fecha_programada: fSolicitud,
+        fecha_realizada: fAtencion ? `${fAtencion} 17:00:00` : null,
+        estado: estado,
         tipo_soporte: document.getElementById('form-visita-tipo').value,
         prioridad: document.getElementById('form-visita-prioridad').value,
         motivo: document.getElementById('form-visita-motivo').value
@@ -2693,7 +2783,7 @@
           director: est ? est.director : '',
           correo_director: est ? est.correo_director : '',
           seguimiento_bitacora: [
-            { fecha: new Date().toISOString().replace('T', ' ').substring(0, 16), autor: payload.tecnico_responsable, nota: "Visita registrada en el sistema." }
+            { fecha: new Date().toISOString().replace('T', ' ').substring(0, 16), autor: payload.tecnico_responsable, nota: `Solicitud registrada para atención técnica.` }
           ],
           observaciones_cierre: null,
           firma_recepcion: null
@@ -2785,6 +2875,8 @@
       const cc = document.getElementById('email-cc').value;
       const extra = document.getElementById('email-mensaje-extra').value;
       const colegio = v.establecimiento_nombre || 'Establecimiento Educacional';
+      const fSolicitud = v.fecha_solicitud || v.fecha_programada || '--';
+      const fAtencion = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : null);
 
       const previewBox = document.getElementById('email-preview-box');
       previewBox.innerHTML = `
@@ -2807,7 +2899,8 @@
             <div><strong>RBD:</strong> <span class="font-mono">${v.rbd}</span></div>
             <div><strong>Comuna:</strong> ${v.establecimiento_comuna || 'Regional'}</div>
             <div><strong>Técnico Asignado:</strong> <span class="text-blue-700 font-bold">${v.tecnico_responsable}</span></div>
-            <div><strong>Fecha Programada:</strong> <span class="font-mono">${v.fecha_programada}</span></div>
+            <div><strong>Fecha Solicitud:</strong> <span class="font-mono text-blue-700">${fSolicitud}</span></div>
+            <div><strong>Fecha Atención:</strong> <span class="font-mono font-bold ${fAtencion ? 'text-emerald-700' : 'text-slate-400'}">${fAtencion || 'Pendiente'}</span></div>
             <div><strong>Categoría:</strong> ${v.tipo_soporte || 'Soporte Correctivo'}</div>
             <div><strong>Estado / Prioridad:</strong> ${v.estado} (${v.prioridad || 'Media'})</div>
           </div>
@@ -2913,6 +3006,8 @@
       const asunto = document.getElementById('email-asunto').value || '';
       const extra = document.getElementById('email-mensaje-extra').value || '';
       const idAtencion = `OT-2026-${String(v.id).padStart(4, '0')}`;
+      const fSolicitud = v.fecha_solicitud || v.fecha_programada || '--';
+      const fAtencion = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : null);
 
       const cuerpo = `Estimado(a) Director(a) / Encargado(a) TI de ${v.establecimiento_nombre}:
 
@@ -2925,8 +3020,8 @@ Se ha registrado exitosamente una visita técnica de Soporte TI para su establec
 • Establecimiento: ${v.establecimiento_nombre} (RBD: ${v.rbd})
 • Comuna: ${v.establecimiento_comuna || 'Regional'}
 • Técnico Responsable Asignado: ${v.tecnico_responsable}
-• Fecha Programada de Visita: ${v.fecha_programada}
-• Estado Actual: ${v.estado}
+• Fecha de Solicitud: ${fSolicitud}
+${fAtencion ? `• Fecha de Atención: ${fAtencion}\n` : ''}• Estado Actual: ${v.estado}
 • Categoría de Soporte: ${v.tipo_soporte}
 • Prioridad: ${v.prioridad || 'Media'}
 • Motivo / Requerimiento:
@@ -2952,13 +3047,15 @@ Plataforma de Gestión de Visitas TI`;
 
       const extra = document.getElementById('email-mensaje-extra').value || '';
       const idAtencion = `OT-2026-${String(v.id).padStart(4, '0')}`;
+      const fSolicitud = v.fecha_solicitud || v.fecha_programada || '--';
+      const fAtencion = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : null);
 
       const texto = `[NOTIFICACIÓN DE VISITA DE SOPORTE TI - ID ${idAtencion}]
 
 Establecimiento: ${v.establecimiento_nombre} (RBD: ${v.rbd})
 Comuna: ${v.establecimiento_comuna || 'Regional'}
 Técnico Asignado: ${v.tecnico_responsable}
-Fecha Programada: ${v.fecha_programada}
+Fecha de Solicitud: ${fSolicitud}${fAtencion ? `\nFecha de Atención: ${fAtencion}` : ''}
 Estado: ${v.estado} | Prioridad: ${v.prioridad || 'Media'}
 Categoría: ${v.tipo_soporte || 'Soporte Correctivo'}
 
@@ -3010,7 +3107,13 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       document.getElementById('seg-escuela').innerText = `${v.establecimiento_nombre || 'RBD ' + v.rbd} (${v.establecimiento_comuna || 'Regional'})`;
       document.getElementById('seg-tecnico').innerText = v.tecnico_responsable;
       document.getElementById('seg-motivo').innerText = v.motivo;
+      document.getElementById('seg-fecha-solicitud').innerText = v.fecha_solicitud || v.fecha_programada || '--';
       document.getElementById('seg-estado').value = v.estado;
+      
+      const fAtn = v.fecha_atencion ? (v.fecha_atencion.split('T')[0] || v.fecha_atencion.split(' ')[0]) : (v.fecha_realizada ? (v.fecha_realizada.split('T')[0] || v.fecha_realizada.split(' ')[0]) : '');
+      document.getElementById('seg-fecha-atencion').value = fAtn;
+      alCambiarEstadoSeguimiento();
+
       document.getElementById('seg-observaciones').value = v.observaciones_cierre || '';
       document.getElementById('seg-firma').value = v.firma_recepcion || '';
       document.getElementById('seg-nueva-nota').value = '';
@@ -3019,6 +3122,18 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
 
       document.getElementById('modal-seguimiento-visita').classList.remove('hidden');
       lucide.createIcons();
+    }
+
+    function alCambiarEstadoSeguimiento() {
+      const estado = document.getElementById('seg-estado').value;
+      const inputAtencion = document.getElementById('seg-fecha-atencion');
+      if (estado === 'Pendiente') {
+        inputAtencion.value = '';
+      } else if (estado === 'En Proceso' || estado === 'Realizada') {
+        if (!inputAtencion.value) {
+          inputAtencion.value = new Date().toISOString().split('T')[0];
+        }
+      }
     }
 
     function renderizarBitacoraModal(visita) {
@@ -3098,9 +3213,17 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       if (!v) return;
 
       const nuevoEstado = document.getElementById('seg-estado').value;
+      const fAtencion = document.getElementById('seg-fecha-atencion').value || null;
+
       v.estado = nuevoEstado;
-      if (nuevoEstado === 'Realizada' && !v.fecha_realizada) {
-        v.fecha_realizada = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      if (nuevoEstado === 'Pendiente') {
+        v.fecha_atencion = null;
+        v.fecha_realizada = null;
+      } else {
+        v.fecha_atencion = fAtencion || new Date().toISOString().split('T')[0];
+        if (nuevoEstado === 'Realizada') {
+          v.fecha_realizada = `${v.fecha_atencion} 17:00:00`;
+        }
       }
 
       if (apiDisponible) {
@@ -3108,7 +3231,11 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           await fetch(`${API_BASE}/api/visitas/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ estado: nuevoEstado, fecha_realizada: v.fecha_realizada })
+            body: JSON.stringify({
+              estado: nuevoEstado,
+              fecha_atencion: v.fecha_atencion,
+              fecha_realizada: v.fecha_realizada
+            })
           });
         } catch (e) { console.error(e); }
       }
@@ -3116,6 +3243,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       guardarEnLocalStorage();
       actualizarDashboard();
       renderizarVisitas();
+      actualizarReporte();
       actualizarGraficos();
       mostrarToast(`Estado actualizado a: ${nuevoEstado}`, "success");
     }
@@ -3126,14 +3254,22 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       if (!v) return;
 
       const nuevoEstado = document.getElementById('seg-estado').value;
+      const fAtencion = document.getElementById('seg-fecha-atencion').value || null;
       const obs = document.getElementById('seg-observaciones').value;
       const firma = document.getElementById('seg-firma').value;
 
       v.estado = nuevoEstado;
       v.observaciones_cierre = obs;
       v.firma_recepcion = firma;
-      if (nuevoEstado === 'Realizada') {
-        v.fecha_realizada = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+      if (nuevoEstado === 'Pendiente') {
+        v.fecha_atencion = null;
+        v.fecha_realizada = null;
+      } else {
+        v.fecha_atencion = fAtencion || new Date().toISOString().split('T')[0];
+        if (nuevoEstado === 'Realizada') {
+          v.fecha_realizada = `${v.fecha_atencion} 17:00:00`;
+        }
       }
 
       if (apiDisponible) {
@@ -3145,6 +3281,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
               estado: nuevoEstado,
               observaciones_cierre: obs,
               firma_recepcion: firma,
+              fecha_atencion: v.fecha_atencion,
               fecha_realizada: v.fecha_realizada
             })
           });
@@ -3719,15 +3856,15 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
             fechaSolicitud = fechaSolicitud.trim().substring(0, 10);
           }
 
-          // 2. Fecha de Realización
-          let fechaRealizada = row['Fecha Realización'] || row['Fecha Realizacion'] || row['Fecha Realización (AAAA-MM-DD)'] || row['Fecha en que se realizo'] || row['Fecha en que se realizó'] || row['Fecha de Realización'] || row['Fecha de Realizacion'] || row['Fecha Realizada'] || row['Fecha Ejecución'] || null;
-          if (typeof fechaRealizada === 'number') {
-            const d2 = new Date(Math.round((fechaRealizada - 25569) * 86400 * 1000));
-            fechaRealizada = d2.toISOString().split('T')[0];
-          } else if (typeof fechaRealizada === 'string' && fechaRealizada.trim() !== '') {
-            fechaRealizada = fechaRealizada.trim().substring(0, 10);
+          // 2. Fecha de Atención / Realización
+          let fechaAtencion = row['Fecha Atención'] || row['Fecha Atencion'] || row['Fecha Atención (AAAA-MM-DD)'] || row['Fecha Atencion (AAAA-MM-DD)'] || row['Fecha de Atención'] || row['Fecha de Atencion'] || row['Fecha Realización'] || row['Fecha Realizacion'] || row['Fecha Realización (AAAA-MM-DD)'] || row['Fecha en que se realizo'] || row['Fecha en que se realizó'] || row['Fecha de Realización'] || row['Fecha de Realizacion'] || row['Fecha Realizada'] || row['Fecha Ejecución'] || null;
+          if (typeof fechaAtencion === 'number') {
+            const d2 = new Date(Math.round((fechaAtencion - 25569) * 86400 * 1000));
+            fechaAtencion = d2.toISOString().split('T')[0];
+          } else if (typeof fechaAtencion === 'string' && fechaAtencion.trim() !== '') {
+            fechaAtencion = fechaAtencion.trim().substring(0, 10);
           } else {
-            fechaRealizada = null;
+            fechaAtencion = null;
           }
 
           // 3. Estado (Asimilación inteligente: "No Realizado" -> "Pendiente")
@@ -3751,8 +3888,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           const estLower = estadoRaw ? estadoRaw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : '';
 
           if (!estLower) {
-            // Si no se especifica estado, se asume Pendiente a menos que tenga fecha de realización
-            estado = fechaRealizada ? 'Realizada' : 'Pendiente';
+            estado = fechaAtencion ? 'Realizada' : 'Pendiente';
           } else if (
             estLower === 'no' || estLower === 'n' || estLower === 'false' || estLower === 'falso' || estLower === '0' ||
             estLower.includes('no realiz') || estLower.includes('no se realiz') || estLower.includes('sin realiz') ||
@@ -3762,9 +3898,8 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
             estLower.includes('incomplet') || estLower.includes('fallid') || estLower.includes('suspend') ||
             estLower.includes('cancel') || estLower.includes('posterg')
           ) {
-            // ASIMILACIÓN SOLICITADA: No Realizado -> Pendiente
             estado = 'Pendiente';
-            fechaRealizada = null;
+            fechaAtencion = null;
           } else if (estLower.includes('proceso') || estLower.includes('curso') || estLower.includes('terreno') || estLower.includes('atendiendo')) {
             estado = 'En Proceso';
           } else if (estLower.includes('program') || estLower.includes('agend') || estLower.includes('planific') || estLower.includes('coordinad')) {
@@ -3777,14 +3912,14 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           ) {
             estado = 'Realizada';
           } else {
-            estado = fechaRealizada ? 'Realizada' : 'Pendiente';
+            estado = fechaAtencion ? 'Realizada' : 'Pendiente';
           }
 
-          // Si es realizada y no viene fecha de realización, usar la fecha de solicitud
-          if (estado === 'Realizada' && !fechaRealizada) {
-            fechaRealizada = fechaSolicitud;
-          } else if (estado !== 'Realizada') {
-            fechaRealizada = null;
+          // Si es realizada y no viene fecha de atención, usar la fecha de solicitud
+          if (estado === 'Realizada' && !fechaAtencion) {
+            fechaAtencion = fechaSolicitud;
+          } else if (estado === 'Pendiente') {
+            fechaAtencion = null;
           }
 
           const detalle = row['Detalle / Motivo de la Visita'] || row.Detalle || row.detalle || row.Motivo || row.motivo || row['Descripcion'] || row['Descripción'] || row['Trabajo Realizado'] || row['Incidencia'] || 'Atención técnica realizada conforme a requerimiento';
@@ -3810,14 +3945,16 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
             estado: estado,
             tipo_soporte: catSoporte,
             prioridad: prioridad,
+            fecha_solicitud: fechaSolicitud,
+            fecha_atencion: fechaAtencion,
             fecha_programada: fechaSolicitud,
-            fecha_realizada: fechaRealizada ? `${fechaRealizada} 17:00:00` : null,
+            fecha_realizada: fechaAtencion ? `${fechaAtencion} 17:00:00` : null,
             motivo: detalle,
             observaciones_cierre: obs || (estado === 'Realizada' ? 'Trabajo concluido conforme a requerimiento institucional.' : (estado === 'Pendiente' ? 'Visita técnica pendiente de atención / No realizada.' : null)),
             firma_recepcion: estado === 'Realizada' ? (estObj ? `${estObj.director} - Dirección` : 'Recepción Conforme') : null,
             seguimiento_bitacora: [
               { fecha: fechaSolicitud, autor: tecnico, nota: `Solicitud registrada. Motivo: ${detalle}` },
-              ...(estado === 'Realizada' && fechaRealizada ? [{ fecha: fechaRealizada, autor: tecnico, nota: `Visita técnica ejecutada exitosamente. ${obs || ''}` }] : (estado === 'Pendiente' ? [{ fecha: fechaSolicitud, autor: tecnico, nota: `Estado: Pendiente / No realizada. ${obs || ''}`.trim() }] : []))
+              ...(estado === 'Realizada' && fechaAtencion ? [{ fecha: fechaAtencion, autor: tecnico, nota: `Visita técnica ejecutada exitosamente. ${obs || ''}` }] : (estado === 'Pendiente' ? [{ fecha: fechaSolicitud, autor: tecnico, nota: `Estado: Pendiente / No realizada. ${obs || ''}`.trim() }] : []))
             ]
           };
 
@@ -3828,8 +3965,8 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           tr.innerHTML = `
             <td class="px-2.5 py-1.5 font-bold text-slate-800">RBD ${rbd} <span class="font-normal text-slate-500 block text-[10px]">${nombreFinal}</span></td>
             <td class="px-2.5 py-1.5">${tecnico}</td>
-            <td class="px-2.5 py-1.5 font-mono text-slate-600">${fechaSolicitud}</td>
-            <td class="px-2.5 py-1.5 font-mono font-bold text-emerald-700">${fechaRealizada || '<span class="text-slate-400 font-normal">--</span>'}</td>
+            <td class="px-2.5 py-1.5 font-mono text-blue-700 font-semibold">${fechaSolicitud}</td>
+            <td class="px-2.5 py-1.5 font-mono font-bold ${fechaAtencion ? 'text-emerald-700' : 'text-slate-400'}">${fechaAtencion || '<span class="text-slate-400 font-normal">--</span>'}</td>
             <td class="px-2.5 py-1.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold badge-${estado.replace(/\s+/g, '_')}">${estado}</span></td>
             <td class="px-2.5 py-1.5 max-w-xs truncate" title="${escapeHtml(detalle)}">${escapeHtml(detalle)}</td>
             <td class="px-2.5 py-1.5 font-bold text-emerald-800 bg-emerald-50/70 border-l border-emerald-100">${catSoporte}</td>
@@ -3883,7 +4020,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Liceo Bicentenario Industrial",
           "Técnico Responsable": "Sebastian Guevara",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-07-05",
-          "Fecha Realización (AAAA-MM-DD)": "2026-07-08",
+          "Fecha Atención (AAAA-MM-DD)": "2026-07-08",
           "Estado (Realizada / No Realizado / Pendiente)": "Realizada",
           "Prioridad (Opcional)": "Alta",
           "Detalle / Motivo de la Visita": "Instalación y configuración de 4 puntos de acceso Wi-Fi UniFi U6 en laboratorios de informática",
@@ -3894,7 +4031,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Escuela Gabriela Mistral",
           "Técnico Responsable": "Rodrigo Bravo",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-07-12",
-          "Fecha Realización (AAAA-MM-DD)": "2026-07-14",
+          "Fecha Atención (AAAA-MM-DD)": "2026-07-14",
           "Estado (Realizada / No Realizado / Pendiente)": "Realizada",
           "Prioridad (Opcional)": "Urgente",
           "Detalle / Motivo de la Visita": "Revisión de caída de enlace en switch principal y falla de módulo de fibra óptica",
@@ -3905,7 +4042,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Liceo Politécnico América",
           "Técnico Responsable": "Claudio Rojas",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-07-18",
-          "Fecha Realización (AAAA-MM-DD)": "",
+          "Fecha Atención (AAAA-MM-DD)": "",
           "Estado (Realizada / No Realizado / Pendiente)": "No Realizado",
           "Prioridad (Opcional)": "Media",
           "Detalle / Motivo de la Visita": "Impresora Ricoh de inspectoría atascada y sin tóner negro",
@@ -3916,7 +4053,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Escuela Bernardo O'Higgins",
           "Técnico Responsable": "Sebastian Guevara",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-08-01",
-          "Fecha Realización (AAAA-MM-DD)": "2026-08-04",
+          "Fecha Atención (AAAA-MM-DD)": "2026-08-04",
           "Estado (Realizada / No Realizado / Pendiente)": "Realizada",
           "Prioridad (Opcional)": "Baja",
           "Detalle / Motivo de la Visita": "Mantenimiento preventivo general, limpieza y soplado de computadores en sala de profesores",
@@ -3927,7 +4064,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Liceo Diego Portales",
           "Técnico Responsable": "Claudio Rojas",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-08-08",
-          "Fecha Realización (AAAA-MM-DD)": "",
+          "Fecha Atención (AAAA-MM-DD)": "",
           "Estado (Realizada / No Realizado / Pendiente)": "No Realizado",
           "Prioridad (Opcional)": "Media",
           "Detalle / Motivo de la Visita": "Formateo y reinstalación de Windows 11 con paquete Office en 6 computadores lentos",
@@ -3938,7 +4075,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
           "Nombre Establecimiento (Opcional)": "Sala Cuna Los Pinitos",
           "Técnico Responsable": "Rodrigo Bravo",
           "Fecha Solicitud (AAAA-MM-DD)": "2026-08-15",
-          "Fecha Realización (AAAA-MM-DD)": "2026-08-17",
+          "Fecha Atención (AAAA-MM-DD)": "2026-08-17",
           "Estado (Realizada / Pendiente / En Proceso)": "Realizada",
           "Prioridad (Opcional)": "Media",
           "Detalle / Motivo de la Visita": "Entrega de pantalla interactiva y proyector para sala multiuso",
@@ -3977,8 +4114,9 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       }
 
       const filtradas = visitas.filter(v => {
-        const matchDesde = !desde || v.fecha_programada >= desde;
-        const matchHasta = !hasta || v.fecha_programada <= hasta;
+        const fRef = v.fecha_solicitud || v.fecha_programada || '';
+        const matchDesde = !desde || fRef >= desde;
+        const matchHasta = !hasta || fRef <= hasta;
         const matchEst = !estRbd || v.rbd == estRbd;
         const matchEstado = !estado || v.estado === estado;
         const matchTecnico = !tecnico || (v.tecnico_responsable || '').toLowerCase().includes(tecnico);
@@ -3996,7 +4134,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       tbody.innerHTML = '';
 
       if (filtradas.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400">No hay atenciones en el rango seleccionado.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-slate-400">No hay atenciones en el rango seleccionado.</td></tr>`;
         return;
       }
 
@@ -4004,16 +4142,19 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
         const badgeClass = `badge-${v.estado.replace(/\s+/g, '_')}`;
+        const fSol = v.fecha_solicitud || v.fecha_programada || '--';
+        const fAtn = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : null);
 
         tr.innerHTML = `
-          <td class="px-4 py-3 font-mono font-bold">#${v.id}</td>
-          <td class="px-4 py-3 font-semibold text-slate-900">${v.establecimiento_nombre || 'RBD ' + v.rbd}</td>
-          <td class="px-4 py-3">${v.tecnico_responsable}</td>
-          <td class="px-4 py-3">${v.tipo_soporte || 'General'}</td>
-          <td class="px-4 py-3 font-mono">${v.fecha_programada}</td>
-          <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full font-bold ${badgeClass}">${v.estado}</span></td>
-          <td class="px-4 py-3 text-slate-600">${v.firma_recepcion || 'Pendiente de firma'}</td>
-          <td class="px-4 py-3 text-right">
+          <td class="px-3 py-3 font-mono font-bold">#${v.id}</td>
+          <td class="px-3 py-3 font-semibold text-slate-900">${v.establecimiento_nombre || 'RBD ' + v.rbd}</td>
+          <td class="px-3 py-3">${v.tecnico_responsable}</td>
+          <td class="px-3 py-3">${v.tipo_soporte || 'General'}</td>
+          <td class="px-3 py-3 font-mono text-blue-700 font-semibold">${fSol}</td>
+          <td class="px-3 py-3 font-mono font-bold ${fAtn ? 'text-emerald-700' : 'text-slate-400'}">${fAtn || '<span class="text-slate-400 font-normal">--</span>'}</td>
+          <td class="px-3 py-3"><span class="px-2 py-0.5 rounded-full font-bold ${badgeClass}">${v.estado}</span></td>
+          <td class="px-3 py-3 text-slate-600">${v.firma_recepcion || 'Pendiente de firma'}</td>
+          <td class="px-3 py-3 text-right">
             <button onclick="generarActaImprimible(${v.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded">
               Ver Acta
             </button>
@@ -4031,8 +4172,9 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       const tecnico = (document.getElementById('rep-tecnico').value || '').toLowerCase();
 
       const filtradas = visitas.filter(v => {
-        const matchDesde = !desde || v.fecha_programada >= desde;
-        const matchHasta = !hasta || v.fecha_programada <= hasta;
+        const fRef = v.fecha_solicitud || v.fecha_programada || '';
+        const matchDesde = !desde || fRef >= desde;
+        const matchHasta = !hasta || fRef <= hasta;
         const matchEst = !estRbd || v.rbd == estRbd;
         const matchEstado = !estado || v.estado === estado;
         const matchTecnico = !tecnico || (v.tecnico_responsable || '').toLowerCase().includes(tecnico);
@@ -4048,8 +4190,8 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
         "Estado": v.estado,
         "Categoría": v.tipo_soporte,
         "Prioridad": v.prioridad,
-        "Fecha Programada": v.fecha_programada,
-        "Fecha Realizada": v.fecha_realizada || 'N/A',
+        "Fecha de Solicitud": v.fecha_solicitud || v.fecha_programada,
+        "Fecha de Atención": v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : (v.estado === 'Pendiente' ? 'Pendiente' : 'N/A')),
         "Motivo / Requerimiento": v.motivo,
         "Observaciones de Cierre": v.observaciones_cierre || '',
         "Recepción Conforme": v.firma_recepcion || ''
@@ -4067,9 +4209,12 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       if (!v) return;
 
       const est = establecimientos.find(e => e.rbd === v.rbd) || {};
+      const fSol = v.fecha_solicitud || v.fecha_programada || '--';
+      const fAtn = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : 'Pendiente');
+      const fDoc = v.fecha_atencion || (v.fecha_realizada ? v.fecha_realizada.substring(0, 10) : (v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0]));
 
       document.getElementById('acta-numero').innerText = String(v.id).padStart(4, '0');
-      document.getElementById('acta-fecha-doc').innerText = v.fecha_realizada || v.fecha_programada || new Date().toISOString().split('T')[0];
+      document.getElementById('acta-fecha-doc').innerText = fDoc;
       document.getElementById('acta-escuela').innerText = v.establecimiento_nombre || est.nombre || 'Establecimiento Regional';
       document.getElementById('acta-rbd').innerText = v.rbd;
       document.getElementById('acta-comuna').innerText = v.establecimiento_comuna || est.comuna || 'Regional';
@@ -4079,6 +4224,8 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       document.getElementById('acta-correo').innerText = est.correo_director || v.correo_director || 'contacto@educacion.cl';
       document.getElementById('acta-tecnico').innerText = v.tecnico_responsable;
       document.getElementById('acta-tipo-soporte').innerText = v.tipo_soporte || 'Soporte TI';
+      document.getElementById('acta-fecha-solicitud').innerText = fSol;
+      document.getElementById('acta-fecha-atencion').innerText = fAtn;
       document.getElementById('acta-motivo').innerText = v.motivo;
 
       let hwFormatted = 'No se especificó equipamiento.';

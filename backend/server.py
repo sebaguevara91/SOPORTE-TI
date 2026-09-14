@@ -62,14 +62,14 @@ def init_db():
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
             conn.executescript(f.read())
 
-    # 2. Migración segura previa: si la tabla ya existía sin la columna correo_establecimiento o tipo_establecimiento
+    # 2. Migración segura previa: si la tabla ya existía sin columnas nuevas
     try:
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(establecimientos)")
-        cols = [row[1] for row in cur.fetchall()]
-        if cols and "correo_establecimiento" not in cols:
+        cols_est = [row[1] for row in cur.fetchall()]
+        if cols_est and "correo_establecimiento" not in cols_est:
             conn.execute("ALTER TABLE establecimientos ADD COLUMN correo_establecimiento VARCHAR(150)")
-        if cols and "tipo_establecimiento" not in cols:
+        if cols_est and "tipo_establecimiento" not in cols_est:
             conn.execute("ALTER TABLE establecimientos ADD COLUMN tipo_establecimiento VARCHAR(50) DEFAULT 'Escuela'")
         conn.commit()
 
@@ -83,6 +83,44 @@ def init_db():
             UPDATE establecimientos SET tipo_establecimiento = 'Sala Cuna'
             WHERE (tipo_establecimiento IS NULL OR tipo_establecimiento = 'Escuela')
               AND (LOWER(nombre) LIKE '%sala cuna%' OR LOWER(nombre) LIKE '%salacuna%' OR LOWER(nombre) LIKE '%jardín%' OR LOWER(nombre) LIKE '%jardin%')
+        """)
+        conn.commit()
+
+        # Migración de tabla visitas: fecha_solicitud y fecha_atencion
+        cur.execute("PRAGMA table_info(visitas)")
+        cols_vis = [row[1] for row in cur.fetchall()]
+        if cols_vis and "fecha_solicitud" not in cols_vis:
+            conn.execute("ALTER TABLE visitas ADD COLUMN fecha_solicitud DATE")
+        if cols_vis and "fecha_atencion" not in cols_vis:
+            conn.execute("ALTER TABLE visitas ADD COLUMN fecha_atencion VARCHAR(50)")
+        conn.commit()
+
+        # Población inicial / normalización de fechas
+        conn.execute("""
+            UPDATE visitas 
+            SET fecha_solicitud = fecha_programada 
+            WHERE fecha_solicitud IS NULL AND fecha_programada IS NOT NULL
+        """)
+        conn.execute("""
+            UPDATE visitas 
+            SET fecha_programada = fecha_solicitud 
+            WHERE fecha_programada IS NULL AND fecha_solicitud IS NOT NULL
+        """)
+        conn.execute("""
+            UPDATE visitas 
+            SET fecha_atencion = fecha_realizada 
+            WHERE fecha_atencion IS NULL AND fecha_realizada IS NOT NULL AND estado != 'Pendiente'
+        """)
+        conn.execute("""
+            UPDATE visitas 
+            SET fecha_realizada = fecha_atencion 
+            WHERE fecha_realizada IS NULL AND fecha_atencion IS NOT NULL AND estado != 'Pendiente'
+        """)
+        # Para registros Pendientes: la fecha programada es la fecha de solicitud, y la fecha de atención es NULL
+        conn.execute("""
+            UPDATE visitas 
+            SET fecha_atencion = NULL, fecha_realizada = NULL 
+            WHERE estado = 'Pendiente'
         """)
         conn.commit()
     except Exception as e:
@@ -112,16 +150,19 @@ def init_db():
     except Exception as e:
         print(f"[AUTH] Advertencia en inicialización de usuarios: {e}")
 
-    # 4. Solo si la tabla de establecimientos está 100% vacía, cargar semillas iniciales una única vez
+    # 4. Si la base de datos está vacía o tiene datos incompletos (< 20 establecimientos o < 10 visitas), cargar semillas completas de Valle Diguillín
     try:
         total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
-        if total_est == 0 and os.path.exists(SEEDS_PATH):
+        total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
+        if (total_est < 20 or total_vis < 10) and os.path.exists(SEEDS_PATH):
             with open(SEEDS_PATH, "r", encoding="utf-8") as f:
                 conn.executescript(f.read())
             conn.commit()
-            print("[DB] Base de datos nueva: datos iniciales sembrados exitosamente.")
+            total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
+            total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
+            print(f"[DB] Base de datos sincronizada exitosamente: {total_est} establecimientos y {total_vis} visitas cargadas.")
         else:
-            print(f"[DB] Base de datos cargada ({total_est} establecimientos conservados sin sobreescribir).")
+            print(f"[DB] Base de datos cargada ({total_est} establecimientos y {total_vis} visitas conservadas).")
     except Exception as e:
         print(f"[DB] Advertencia al verificar datos iniciales: {e}")
 
@@ -179,8 +220,10 @@ class VisitaBase(BaseModel):
     estado: str = Field("Pendiente", description="Pendiente, En Proceso, Realizada o Programada")
     tipo_soporte: Optional[str] = Field("Soporte Correctivo", description="Categoría de la atención técnica")
     prioridad: Optional[str] = Field("Media", description="Baja, Media, Alta o Urgente")
-    fecha_programada: str = Field(..., description="Fecha asignada (YYYY-MM-DD)")
-    fecha_realizada: Optional[str] = Field(None, description="Fecha de cierre/ejecución")
+    fecha_solicitud: Optional[str] = Field(None, description="Fecha en la que se solicitó la atención (YYYY-MM-DD)")
+    fecha_atencion: Optional[str] = Field(None, description="Fecha en que se atendió/gestionó el caso (YYYY-MM-DD o YYYY-MM-DD HH:MM)")
+    fecha_programada: Optional[str] = Field(None, description="Fecha asignada / solicitud (compatibilidad)")
+    fecha_realizada: Optional[str] = Field(None, description="Fecha de cierre/atención (compatibilidad)")
     motivo: str = Field(..., description="Descripción del requerimiento o falla")
     detalle_hardware: Optional[Union[Dict[str, Any], str]] = Field(None, description="Equipamiento intervenido")
     seguimiento_bitacora: Optional[Union[List[Dict[str, Any]], str]] = Field(None, description="Historial de seguimiento")
@@ -198,6 +241,8 @@ class VisitaUpdate(BaseModel):
     estado: Optional[str] = None
     tipo_soporte: Optional[str] = None
     prioridad: Optional[str] = None
+    fecha_solicitud: Optional[str] = None
+    fecha_atencion: Optional[str] = None
     fecha_programada: Optional[str] = None
     fecha_realizada: Optional[str] = None
     motivo: Optional[str] = None
@@ -497,7 +542,11 @@ def listar_visitas(
     query = """
         SELECT 
             v.id, v.rbd, v.tecnico_responsable, v.estado, v.tipo_soporte, v.prioridad,
-            v.fecha_programada, v.fecha_realizada, v.motivo, v.detalle_hardware,
+            COALESCE(v.fecha_solicitud, v.fecha_programada) AS fecha_solicitud,
+            COALESCE(v.fecha_atencion, v.fecha_realizada) AS fecha_atencion,
+            COALESCE(v.fecha_programada, v.fecha_solicitud) AS fecha_programada,
+            COALESCE(v.fecha_realizada, v.fecha_atencion) AS fecha_realizada,
+            v.motivo, v.detalle_hardware,
             v.seguimiento_bitacora, v.observaciones_cierre, v.firma_recepcion,
             v.created_at, v.updated_at,
             e.nombre AS establecimiento_nombre,
@@ -511,27 +560,27 @@ def listar_visitas(
     """
     params = []
 
-    if estado:
+    if isinstance(estado, str) and estado:
         query += " AND v.estado = ?"
         params.append(estado)
-    if rbd:
+    if isinstance(rbd, int) and rbd:
         query += " AND v.rbd = ?"
         params.append(rbd)
-    if tecnico:
+    if isinstance(tecnico, str) and tecnico:
         query += " AND v.tecnico_responsable LIKE ?"
         params.append(f"%{tecnico}%")
-    if tipo_soporte:
+    if isinstance(tipo_soporte, str) and tipo_soporte:
         query += " AND v.tipo_soporte = ?"
         params.append(tipo_soporte)
-    if desde:
-        query += " AND v.fecha_programada >= ?"
+    if isinstance(desde, str) and desde:
+        query += " AND COALESCE(v.fecha_solicitud, v.fecha_programada) >= ?"
         params.append(desde)
-    if hasta:
-        query += " AND v.fecha_programada <= ?"
+    if isinstance(hasta, str) and hasta:
+        query += " AND COALESCE(v.fecha_solicitud, v.fecha_programada) <= ?"
         params.append(hasta)
 
-    orden_dir = "ASC" if (orden and orden.lower() == "asc") else "DESC"
-    query += f" ORDER BY v.fecha_programada {orden_dir}, v.id {orden_dir}"
+    orden_dir = "ASC" if (isinstance(orden, str) and orden.lower() == "asc") else "DESC"
+    query += f" ORDER BY COALESCE(v.fecha_solicitud, v.fecha_programada) {orden_dir}, v.id {orden_dir}"
     rows = conn.execute(query, params).fetchall()
     conn.close()
 
@@ -561,7 +610,11 @@ def obtener_visita(visita_id: int):
         """
         SELECT 
             v.id, v.rbd, v.tecnico_responsable, v.estado, v.tipo_soporte, v.prioridad,
-            v.fecha_programada, v.fecha_realizada, v.motivo, v.detalle_hardware,
+            COALESCE(v.fecha_solicitud, v.fecha_programada) AS fecha_solicitud,
+            COALESCE(v.fecha_atencion, v.fecha_realizada) AS fecha_atencion,
+            COALESCE(v.fecha_programada, v.fecha_solicitud) AS fecha_programada,
+            COALESCE(v.fecha_realizada, v.fecha_atencion) AS fecha_realizada,
+            v.motivo, v.detalle_hardware,
             v.seguimiento_bitacora, v.observaciones_cierre, v.firma_recepcion,
             v.created_at, v.updated_at,
             e.nombre AS establecimiento_nombre,
@@ -606,13 +659,28 @@ def crear_visita(visita: VisitaCreate):
     detalle_str = json.dumps(visita.detalle_hardware) if isinstance(visita.detalle_hardware, (dict, list)) else visita.detalle_hardware
     bitacora_str = json.dumps(visita.seguimiento_bitacora) if isinstance(visita.seguimiento_bitacora, list) else visita.seguimiento_bitacora
 
+    f_solicitud = visita.fecha_solicitud or visita.fecha_programada or datetime.now().strftime("%Y-%m-%d")
+    f_atencion = visita.fecha_atencion or visita.fecha_realizada or None
+    if visita.estado == "Pendiente":
+        f_atencion = None
+    elif visita.estado == "Realizada" and not f_atencion:
+        f_atencion = f"{f_solicitud} 17:00:00"
+
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO visitas (rbd, tecnico_responsable, estado, tipo_soporte, prioridad, fecha_programada, fecha_realizada, motivo, detalle_hardware, seguimiento_bitacora, observaciones_cierre, firma_recepcion)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO visitas (
+            rbd, tecnico_responsable, estado, tipo_soporte, prioridad,
+            fecha_solicitud, fecha_atencion, fecha_programada, fecha_realizada,
+            motivo, detalle_hardware, seguimiento_bitacora, observaciones_cierre, firma_recepcion
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (visita.rbd, visita.tecnico_responsable, visita.estado, visita.tipo_soporte, visita.prioridad, visita.fecha_programada, visita.fecha_realizada, visita.motivo, detalle_str, bitacora_str, visita.observaciones_cierre, visita.firma_recepcion)
+        (
+            visita.rbd, visita.tecnico_responsable, visita.estado, visita.tipo_soporte, visita.prioridad,
+            f_solicitud, f_atencion, f_solicitud, f_atencion,
+            visita.motivo, detalle_str, bitacora_str, visita.observaciones_cierre, visita.firma_recepcion
+        )
     )
     new_id = cursor.lastrowid
     conn.commit()
@@ -790,9 +858,9 @@ def carga_masiva_visitas(lista: List[Dict[str, Any]], replace: bool = False):
 
         tecnico = item.get("tecnico_responsable") or "Sebastian Guevara"
         
-        # Manejo de fechas de solicitud y realización
+        # Manejo de fechas de solicitud y realización/atención
         fecha_solicitud = item.get("fecha_solicitud") or item.get("fecha_programada") or item.get("fecha") or datetime.now().strftime("%Y-%m-%d")
-        fecha_realizada = item.get("fecha_realizada") or item.get("fecha_ejecucion") or None
+        fecha_atencion = item.get("fecha_atencion") or item.get("fecha_realizada") or item.get("fecha_ejecucion") or None
 
         # Normalización de estado (Mapea 'No Realizado', 'No', etc. -> 'Pendiente')
         raw_estado = (
@@ -804,11 +872,11 @@ def carga_masiva_visitas(lista: List[Dict[str, Any]], replace: bool = False):
             item.get("situacion") or item.get("Situacion") or
             None
         )
-        estado = normalizar_estado_visita(raw_estado, fecha_realizada)
-        if estado != "Realizada":
-            fecha_realizada = None
-        elif estado == "Realizada" and not fecha_realizada:
-            fecha_realizada = f"{fecha_solicitud} 17:00:00"
+        estado = normalizar_estado_visita(raw_estado, fecha_atencion)
+        if estado == "Pendiente":
+            fecha_atencion = None
+        elif estado == "Realizada" and not fecha_atencion:
+            fecha_atencion = f"{fecha_solicitud} 17:00:00"
 
         motivo = item.get("motivo") or item.get("detalle") or "Atención técnica a requerimiento del establecimiento"
         
@@ -832,10 +900,14 @@ def carga_masiva_visitas(lista: List[Dict[str, Any]], replace: bool = False):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO visitas (rbd, tecnico_responsable, estado, tipo_soporte, prioridad, fecha_programada, fecha_realizada, motivo, detalle_hardware, seguimiento_bitacora, observaciones_cierre, firma_recepcion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO visitas (
+                rbd, tecnico_responsable, estado, tipo_soporte, prioridad,
+                fecha_solicitud, fecha_atencion, fecha_programada, fecha_realizada,
+                motivo, detalle_hardware, seguimiento_bitacora, observaciones_cierre, firma_recepcion
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (rbd, tecnico, estado, tipo_soporte, prioridad, fecha_solicitud, fecha_realizada, motivo, None, None, obs, firma)
+            (rbd, tecnico, estado, tipo_soporte, prioridad, fecha_solicitud, fecha_atencion, fecha_solicitud, fecha_atencion, motivo, None, None, obs, firma)
         )
         insertados += 1
 
@@ -859,10 +931,29 @@ def actualizar_visita(visita_id: int, datos: VisitaUpdate):
             conn.close()
             raise HTTPException(status_code=400, detail=f"El establecimiento con RBD {datos.rbd} no existe.")
 
+    datos_dict = datos.dict(exclude_unset=True)
+
+    # Sincronizar fecha_solicitud y fecha_programada
+    if "fecha_solicitud" in datos_dict and "fecha_programada" not in datos_dict:
+        datos_dict["fecha_programada"] = datos_dict["fecha_solicitud"]
+    elif "fecha_programada" in datos_dict and "fecha_solicitud" not in datos_dict:
+        datos_dict["fecha_solicitud"] = datos_dict["fecha_programada"]
+
+    # Sincronizar fecha_atencion y fecha_realizada
+    if "fecha_atencion" in datos_dict and "fecha_realizada" not in datos_dict:
+        datos_dict["fecha_realizada"] = datos_dict["fecha_atencion"]
+    elif "fecha_realizada" in datos_dict and "fecha_atencion" not in datos_dict:
+        datos_dict["fecha_atencion"] = datos_dict["fecha_realizada"]
+
+    # Si cambia a Pendiente, limpiar fecha_atencion / fecha_realizada
+    if datos_dict.get("estado") == "Pendiente":
+        datos_dict["fecha_atencion"] = None
+        datos_dict["fecha_realizada"] = None
+
     update_fields = []
     params = []
 
-    for field, val in datos.dict(exclude_unset=True).items():
+    for field, val in datos_dict.items():
         if field in ("detalle_hardware", "seguimiento_bitacora") and isinstance(val, (dict, list)):
             val = json.dumps(val)
         update_fields.append(f"{field} = ?")
@@ -949,6 +1040,9 @@ def enviar_correo_visita(visita_id: int, req: Optional[EnvioCorreoRequest] = Non
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
     mensaje_extra = req.mensaje_adicional if req and req.mensaje_adicional else ""
 
+    f_sol = visita_data.get('fecha_solicitud') or visita_data.get('fecha_programada') or 'No especificada'
+    f_ate = visita_data.get('fecha_atencion') or visita_data.get('fecha_realizada')
+
     # Construir cuerpo en texto plano
     cuerpo_texto = f"""Estimado(a) Director(a) / Encargado(a) TI de {visita_data.get('establecimiento_nombre')}:
 
@@ -961,7 +1055,8 @@ Se ha registrado exitosamente una visita técnica de Soporte TI para su establec
 • Establecimiento: {visita_data.get('establecimiento_nombre')} (RBD: {visita_data.get('rbd')})
 • Comuna: {visita_data.get('establecimiento_comuna', 'Regional')}
 • Técnico Responsable Asignado: {visita_data.get('tecnico_responsable')}
-• Fecha Programada de Visita: {visita_data.get('fecha_programada')}
+• Fecha de Solicitud: {f_sol}
+{f'• Fecha de Atención: {f_ate}' if f_ate else ''}
 • Estado Actual: {visita_data.get('estado')}
 • Categoría de Soporte: {visita_data.get('tipo_soporte')}
 • Prioridad: {visita_data.get('prioridad')}
@@ -1013,7 +1108,8 @@ Plataforma de Gestión de Visitas TI
         <div class="row"><span class="label">Establecimiento:</span><span class="value">{visita_data.get('establecimiento_nombre')} (RBD: {visita_data.get('rbd')})</span></div>
         <div class="row"><span class="label">Comuna:</span><span class="value">{visita_data.get('establecimiento_comuna', 'Regional')}</span></div>
         <div class="row"><span class="label">Técnico Asignado:</span><span class="value" style="color:#2563eb;">{visita_data.get('tecnico_responsable')}</span></div>
-        <div class="row"><span class="label">Fecha Programada:</span><span class="value">{visita_data.get('fecha_programada')}</span></div>
+        <div class="row"><span class="label">Fecha de Solicitud:</span><span class="value">{f_sol}</span></div>
+        {f'<div class="row"><span class="label">Fecha de Atención:</span><span class="value" style="color:#059669;">{f_ate}</span></div>' if f_ate else ''}
         <div class="row"><span class="label">Categoría:</span><span class="value">{visita_data.get('tipo_soporte')}</span></div>
         <div class="row"><span class="label">Estado / Prioridad:</span><span class="value">{visita_data.get('estado')} ({visita_data.get('prioridad')})</span></div>
       </div>
@@ -1124,6 +1220,26 @@ def eliminar_visita(visita_id: int):
     return {"message": f"Visita #{visita_id} eliminada correctamente."}
 
 
+@app.get("/api/admin/recargar-datos", tags=["Administración"])
+@app.post("/api/admin/recargar-datos", tags=["Administración"])
+def recargar_datos_semilla():
+    """Recarga y sincroniza la base de datos completa con los 136 establecimientos y 180 visitas oficiales."""
+    conn = get_db_connection()
+    if os.path.exists(SEEDS_PATH):
+        with open(SEEDS_PATH, "r", encoding="utf-8") as f:
+            conn.executescript(f.read())
+        conn.commit()
+    total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
+    total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
+    conn.close()
+    return {
+        "status": "success",
+        "mensaje": f"Base de datos sincronizada con éxito: {total_est} establecimientos y {total_vis} visitas cargadas.",
+        "establecimientos": total_est,
+        "visitas": total_vis
+    }
+
+
 # 3. DASHBOARD Y MÉTRICAS AGREGADAS
 
 @app.get("/api/dashboard/stats", tags=["Dashboard"])
@@ -1181,13 +1297,18 @@ def metricas_dashboard():
     # Próximas visitas o pendientes críticas
     proximas = conn.execute(
         """
-        SELECT v.id, v.fecha_programada, v.tecnico_responsable, v.estado, v.prioridad, v.tipo_soporte, v.motivo, e.nombre as establecimiento_nombre, e.comuna
+        SELECT v.id, 
+               COALESCE(v.fecha_solicitud, v.fecha_programada) as fecha_solicitud,
+               COALESCE(v.fecha_atencion, v.fecha_realizada) as fecha_atencion,
+               COALESCE(v.fecha_programada, v.fecha_solicitud) as fecha_programada,
+               COALESCE(v.fecha_realizada, v.fecha_atencion) as fecha_realizada,
+               v.tecnico_responsable, v.estado, v.prioridad, v.tipo_soporte, v.motivo, e.nombre as establecimiento_nombre, e.comuna
         FROM visitas v
         JOIN establecimientos e ON v.rbd = e.rbd
         WHERE v.estado IN ('Pendiente', 'En Proceso', 'Programada')
         ORDER BY 
             CASE v.prioridad WHEN 'Urgente' THEN 1 WHEN 'Alta' THEN 2 WHEN 'Media' THEN 3 ELSE 4 END,
-            v.fecha_programada ASC
+            COALESCE(v.fecha_solicitud, v.fecha_programada) ASC
         LIMIT 6
         """
     ).fetchall()
