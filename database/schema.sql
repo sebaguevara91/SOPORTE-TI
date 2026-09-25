@@ -1,9 +1,22 @@
 -- ==============================================================================
--- PLATAFORMA DE REGISTRO DE VISITAS DE SOPORTE TI
--- Esquema Relacional de Base de Datos (Compatible con SQLite y PostgreSQL)
+-- PLATAFORMA DE REGISTRO DE VISITAS DE SOPORTE TI - SLEP VALLE DIGUILLÍN
+-- Esquema Relacional de Base de Datos (SQLite)
 -- ==============================================================================
 
--- 1. TABLA: establecimientos
+-- 1. TABLA: usuarios (Autenticación y Perfil)
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    nombre VARCHAR(150) NOT NULL,
+    rol VARCHAR(50) DEFAULT 'Tecnico TI', -- 'Administrador TI', 'Tecnico TI'
+    telefono VARCHAR(50),
+    activo INTEGER DEFAULT 1 CHECK (activo IN (0, 1)),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. TABLA: establecimientos
 CREATE TABLE IF NOT EXISTS establecimientos (
     rbd INTEGER PRIMARY KEY,
     nombre VARCHAR(255) NOT NULL,
@@ -22,7 +35,7 @@ CREATE TABLE IF NOT EXISTS establecimientos (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. TABLA: visitas
+-- 3. TABLA: visitas
 CREATE TABLE IF NOT EXISTS visitas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rbd INTEGER NOT NULL,
@@ -32,8 +45,8 @@ CREATE TABLE IF NOT EXISTS visitas (
     prioridad VARCHAR(20) NOT NULL DEFAULT 'Media' CHECK (prioridad IN ('Baja', 'Media', 'Alta', 'Urgente')),
     fecha_solicitud DATE NOT NULL,
     fecha_atencion TIMESTAMP NULL,
-    fecha_programada DATE NULL, -- Retrocompatibilidad
-    fecha_realizada TIMESTAMP NULL, -- Retrocompatibilidad
+    fecha_programada DATE NULL,
+    fecha_realizada TIMESTAMP NULL,
     motivo TEXT NOT NULL,
     detalle_hardware TEXT, -- JSON con detalle de equipos (APs, switches, impresoras, etc.)
     seguimiento_bitacora TEXT, -- JSON Array con bitácora de notas: [{"fecha": "...", "autor": "...", "nota": "..."}]
@@ -44,21 +57,10 @@ CREATE TABLE IF NOT EXISTS visitas (
     FOREIGN KEY (rbd) REFERENCES establecimientos(rbd) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
--- 3. TABLA: usuarios (Autenticación y Perfil)
-CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email VARCHAR(150) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    nombre VARCHAR(150) NOT NULL,
-    rol VARCHAR(50) DEFAULT 'Administrador TI',
-    activo INTEGER DEFAULT 1 CHECK (activo IN (0, 1)),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- 4. ÍNDICES DE RENDIMIENTO
 CREATE INDEX IF NOT EXISTS idx_visitas_rbd ON visitas(rbd);
 CREATE INDEX IF NOT EXISTS idx_visitas_estado ON visitas(estado);
-CREATE INDEX IF NOT EXISTS idx_visitas_fecha_programada ON visitas(fecha_programada);
+CREATE INDEX IF NOT EXISTS idx_visitas_fecha_solicitud ON visitas(fecha_solicitud);
 CREATE INDEX IF NOT EXISTS idx_visitas_tecnico ON visitas(tecnico_responsable);
 CREATE INDEX IF NOT EXISTS idx_establecimientos_comuna ON establecimientos(comuna);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);

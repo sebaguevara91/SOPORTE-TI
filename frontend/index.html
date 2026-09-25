@@ -220,6 +220,17 @@
   <!-- ========================================================================= -->
   <div id="view-app" class="hidden min-h-screen flex flex-col bg-slate-50">
 
+    <!-- BANNER DE ALERTA DE DESCONEXIÓN (SI LA API NO RESPONDE) -->
+    <div id="banner-alerta-desconectado" class="hidden bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-lg sticky top-0 z-50">
+      <div class="flex items-center gap-2">
+        <i data-lucide="alert-triangle" class="w-4 h-4 animate-bounce"></i>
+        <span>Servidor backend no disponible. Asegúrate de ejecutar <code>python backend/server.py</code> para sincronizar en tiempo real.</span>
+      </div>
+      <button onclick="probarConectividadAPI(true)" class="px-3 py-1 bg-slate-900 text-white rounded-md text-[11px] font-bold hover:bg-slate-800 transition cursor-pointer shadow-sm">
+        Reintentar Conexión
+      </button>
+    </div>
+
     <!-- HEADER / BARRA SUPERIOR -->
     <header class="bg-slate-900 text-white sticky top-0 z-40 shadow-lg border-b border-slate-800">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -233,9 +244,10 @@
             <div>
               <div class="flex items-center space-x-2">
                 <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">TI SLEP VALLE DIGUILLIN</h1>
-                <span id="badge-modo-conexion" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">
-                  ● Conectado
-                </span>
+                <button onclick="abrirModalEstadoDB()" id="badge-modo-conexion" class="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center gap-1.5 cursor-pointer hover:bg-emerald-900/80 transition" title="Haz clic para ver el estado del motor de base de datos">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span id="texto-modo-conexion">● Base de Datos Central</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1505,6 +1517,76 @@
 
       </div>
 
+  <!-- MODAL: ESTADO DE LA BASE DE DATOS Y CONECTIVIDAD -->
+  <div id="modal-estado-db" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+      <div class="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-sm sm:text-base flex items-center space-x-2">
+          <i data-lucide="database" class="w-5 h-5 text-blue-400"></i>
+          <span>Estado del Motor de Base de Datos</span>
+        </h3>
+        <button onclick="cerrarModales()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="p-6 space-y-4 overflow-y-auto text-xs sm:text-sm">
+        <!-- Tarjeta de Estado Activo -->
+        <div id="db-status-card" class="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-emerald-900 flex items-center gap-2">
+              <span id="db-info-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span id="db-info-engine">Base de Datos Centralizada</span>
+            </span>
+            <span id="db-info-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+              Conectado
+            </span>
+          </div>
+          <p class="text-xs text-emerald-800 font-mono break-all" id="db-info-target">
+            sqlite:///database/soporte_ti.db
+          </p>
+        </div>
+
+        <!-- Métricas Rápidas de la BD -->
+        <div class="grid grid-cols-3 gap-3 text-center">
+          <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <p class="text-[10px] font-bold text-slate-500 uppercase">Colegios Activos</p>
+            <p class="text-lg font-black text-slate-900" id="db-count-est">132</p>
+          </div>
+          <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <p class="text-[10px] font-bold text-slate-500 uppercase">Visitas Técnicas</p>
+            <p class="text-lg font-black text-blue-600" id="db-count-vis">180</p>
+          </div>
+          <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <p class="text-[10px] font-bold text-slate-500 uppercase">Usuarios TI</p>
+            <p class="text-lg font-black text-slate-900" id="db-count-usr">4</p>
+          </div>
+        </div>
+
+        <!-- Guía de Conexión a Supabase / PostgreSQL -->
+        <div class="p-4 bg-slate-900 text-slate-200 rounded-xl space-y-2 text-xs">
+          <p class="font-bold text-white flex items-center gap-1.5">
+            <i data-lucide="cloud" class="w-4 h-4 text-blue-400"></i>
+            <span>¿Cómo conectar con Supabase / PostgreSQL en la nube?</span>
+          </p>
+          <p class="text-slate-400">
+            Para que todo el equipo técnico trabaje sincronizado en tiempo real desde cualquier computador, configura <code class="text-blue-300 font-mono">DATABASE_URL</code> en el archivo <code class="text-blue-300 font-mono">.env</code>:
+          </p>
+          <pre class="p-2 bg-slate-950 rounded border border-slate-800 font-mono text-[11px] text-emerald-400 overflow-x-auto">DATABASE_URL="postgresql://postgres.xxx:password@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require"</pre>
+          <p class="text-slate-400 text-[11px]">
+            Y ejecuta el migrador automático con un solo comando: <br>
+            <code class="text-blue-300 font-mono">python scripts/migrate_to_postgres.py</code>
+          </p>
+        </div>
+      </div>
+
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
+        <button onclick="probarConectividadAPI(true)" class="px-4 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          <span>Re-verificar Conexión</span>
+        </button>
+        <button onclick="cerrarModales()" class="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1520,36 +1602,36 @@
     let usuarioActual = null;
     let establecimientos = [];
     let visitas = [];
+    let dbStatusData = null;
     let temporalExcelImport = [];
     let temporalVisitasExcelImport = [];
     let vistaVisitasActual = 'tabla';
-    let ordenVisitasFecha = 'desc'; // 'desc' (más recientes primero) o 'asc' (más antiguas primero)
+    let ordenVisitasFecha = 'desc'; // 'desc' (más recientes primero) o 'asc'
     let chartEstados = null;
     let chartCategorias = null;
     let chartComunas = null;
     let chartTiposEst = null;
     let apiDisponible = false;
 
-    // --- DATOS SEMILLA (FALLBACK AUTÓNOMO) ---
+    // --- DATOS SEMILLA OFICIALES (SLEP VALLE DIGUILLÍN) ---
     const SEED_ESTABLECIMIENTOS = [
-      { rbd: 1024, nombre: "Liceo Bicentenario Industrial de Antofagasta", comuna: "Antofagasta", direccion: "Av. Iquique 4520", correo_establecimiento: "contacto@liceoindustrialantofagasta.cl", director: "Carlos Mendoza Silva", correo_director: "director.lbia@educacion.cl", telefono: "+56 55 2234501", matricula: 850, dependencia: "SLEP", contacto_enlaces: "Ing. Pedro Valdivia", tipo_establecimiento: "Liceo", activo: 1 },
-      { rbd: 1025, nombre: "Colegio Técnico Don Bosco", comuna: "Antofagasta", direccion: "Av. Rendic 3200", correo_establecimiento: "secretaria@donboscoantofagasta.cl", director: "Hermano Patricio Araya", correo_director: "paraya@donbosco.cl", telefono: "+56 55 2891200", matricula: 1200, dependencia: "Particular Subvencionado", contacto_enlaces: "Prof. Marco Cortés", tipo_establecimiento: "Liceo", activo: 1 },
-      { rbd: 1026, nombre: "Escuela Básica Gabriela Mistral D-68", comuna: "Calama", direccion: "Calle Lasana 1520", correo_establecimiento: "contacto@escuelamistralcalama.cl", director: "Marcela Gómez Valdés", correo_director: "mgomez@escuelamistral.cl", telefono: "+56 55 2341122", matricula: 450, dependencia: "Municipal", contacto_enlaces: "Carla Monroy", tipo_establecimiento: "Escuela", activo: 1 },
-      { rbd: 1027, nombre: "Liceo Politécnico América", comuna: "Calama", direccion: "Av. Granaderos 2810", correo_establecimiento: "liceo.america@calamaeduca.cl", director: "Roberto Morales Peña", correo_director: "rmorales@politecnicoamerica.cl", telefono: "+56 55 2789900", matricula: 920, dependencia: "SLEP", contacto_enlaces: "Jorge Benítez", tipo_establecimiento: "Liceo", activo: 1 },
-      { rbd: 1028, nombre: "Escuela Básica Bernardo O'Higgins E-42", comuna: "Tocopilla", direccion: "Calle 21 de Mayo 430", correo_establecimiento: "e42.tocopilla@educacion.cl", director: "Patricia Fuentes Jara", correo_director: "pfuentes@escuelatocopilla.cl", telefono: "+56 55 2613344", matricula: 380, dependencia: "Municipal", contacto_enlaces: "Rodrigo Araya", tipo_establecimiento: "Escuela", activo: 1 },
-      { rbd: 1029, nombre: "Liceo Diego Portales Palazuelos", comuna: "Mejillones", direccion: "Calle Almirante Castillo 880", correo_establecimiento: "contacto@liceomejillones.cl", director: "Gonzalo Tapia Ríos", correo_director: "gtapia@liceomejillones.cl", telefono: "+56 55 2421188", matricula: 610, dependencia: "Municipal", contacto_enlaces: "Fabiola Rojas", tipo_establecimiento: "Liceo", activo: 1 },
-      { rbd: 1030, nombre: "Sala Cuna y Jardín Infantil Los Pinitos", comuna: "Antofagasta", direccion: "Calle Los Tamarugos 540", correo_establecimiento: "contacto@jardinlospinitos.cl", director: "Claudia Navarro Vidal", correo_director: "cnavarro@jardinlospinitos.cl", telefono: "+56 55 2981133", matricula: 110, dependencia: "SLEP", contacto_enlaces: "Ana Salinas", tipo_establecimiento: "Sala Cuna", activo: 1 }
+      { rbd: 3638, nombre: "LICEO BICENTENARIO MARTA BRUNET CÁRAVES", comuna: "Chillán", direccion: "Calle Claudio Arrau 655", correo_establecimiento: "marta.brunet@eduvallediguillin.gob.cl", director: "Director Marta Brunet", correo_director: "director.mb@eduvallediguillin.gob.cl", telefono: "+56 42 2223344", matricula: 950, dependencia: "SLEP", contacto_enlaces: "Encargado Enlaces", tipo_establecimiento: "Liceo", activo: 1 },
+      { rbd: 3639, nombre: "LICEO NARCISO TONDREAU", comuna: "Chillán", direccion: "Av. Bernardo O'Higgins 550", correo_establecimiento: "narciso.tondreau@eduvallediguillin.gob.cl", director: "Director Narciso Tondreau", correo_director: "director.nt@eduvallediguillin.gob.cl", telefono: "+56 42 2211223", matricula: 820, dependencia: "SLEP", contacto_enlaces: "Encargado Enlaces", tipo_establecimiento: "Liceo", activo: 1 },
+      { rbd: 1753, nombre: "HAPPY DAY", comuna: "Chillán Viejo", direccion: "Calle Baquedano 320", correo_establecimiento: "riosdelsur2@eduvallediguillin.gob.cl", director: "DENISSE ELIZABET VARGAS LARA", correo_director: "denisse.vargas@eduvallediguillin.gob.cl", telefono: "+56 42 2887766", matricula: 120, dependencia: "SLEP", contacto_enlaces: "Encargado TI", tipo_establecimiento: "Sala Cuna", activo: 1 },
+      { rbd: 3660, nombre: "LICEO MANUEL BULNES", comuna: "Bulnes", direccion: "Calle Palacios 450", correo_establecimiento: "liceo.bulnes@eduvallediguillin.gob.cl", director: "Director Bulnes", correo_director: "director.bulnes@eduvallediguillin.gob.cl", telefono: "+56 42 2451200", matricula: 710, dependencia: "SLEP", contacto_enlaces: "Encargado Enlaces", tipo_establecimiento: "Liceo", activo: 1 },
+      { rbd: 3680, nombre: "ESCUELA SAN IGNACIO", comuna: "San Ignacio", direccion: "Av. Manuel Rodríguez 300", correo_establecimiento: "escuela.sanignacio@eduvallediguillin.gob.cl", director: "Director San Ignacio", correo_director: "director.si@eduvallediguillin.gob.cl", telefono: "+56 42 2781100", matricula: 430, dependencia: "SLEP", contacto_enlaces: "Encargado Enlaces", tipo_establecimiento: "Escuela", activo: 1 },
+      { rbd: 3710, nombre: "LICEO POLIVALENTE DE YUNGAY", comuna: "Yungay", direccion: "Calle Tacna 620", correo_establecimiento: "liceo.yungay@eduvallediguillin.gob.cl", director: "Director Yungay", correo_director: "director.yungay@eduvallediguillin.gob.cl", telefono: "+56 42 2680011", matricula: 640, dependencia: "SLEP", contacto_enlaces: "Encargado Enlaces", tipo_establecimiento: "Liceo", activo: 1 }
     ];
 
     const SEED_VISITAS = [
       {
         id: 1,
-        rbd: 1024,
-        establecimiento_nombre: "Liceo Bicentenario Industrial de Antofagasta",
-        establecimiento_comuna: "Antofagasta",
-        correo_establecimiento: "contacto@liceoindustrialantofagasta.cl",
-        director: "Carlos Mendoza Silva",
-        correo_director: "director.lbia@educacion.cl",
+        rbd: 3638,
+        establecimiento_nombre: "LICEO BICENTENARIO MARTA BRUNET CÁRAVES",
+        establecimiento_comuna: "Chillán",
+        correo_establecimiento: "marta.brunet@eduvallediguillin.gob.cl",
+        director: "Director Marta Brunet",
+        correo_director: "director.mb@eduvallediguillin.gob.cl",
         tecnico_responsable: "Sebastian Guevara",
         estado: "Realizada",
         tipo_soporte: "Problemas de Conectividad",
@@ -1561,87 +1643,12 @@
         motivo: "Mantenimiento preventivo e instalación de puntos de acceso Wi-Fi para laboratorios.",
         detalle_hardware: { "red_ubiquiti": "4 APs UniFi U6-Pro", "impresoras": "Ricoh MP 3055 en red" },
         seguimiento_bitacora: [
-          { "fecha": "2026-08-15 09:30", "autor": "Sebastian Guevara", "nota": "Llegada al establecimiento. Se inicia levantamiento de cobertura de señal." },
-          { "fecha": "2026-08-15 14:00", "autor": "Sebastian Guevara", "nota": "Montaje de 4 APs UniFi U6-Pro finalizado con PoE activo y VLAN configurada." }
+          { "fecha": "2026-08-15 09:30", "autor": "Sebastian Guevara", "nota": "Llegada al establecimiento. Se inicia levantamiento de cobertura." }
         ],
-        observaciones_cierre: "Se realizó el despliegue de 4 APs Ubiquiti UniFi y se verificó cobertura en laboratorio 1 y 2. Impresora Ricoh reconfigurada con segmento IP fijo.",
-        firma_recepcion: "Carlos Mendoza Silva - Director"
-      },
-      {
-        id: 2,
-        rbd: 1026,
-        establecimiento_nombre: "Escuela Básica Gabriela Mistral D-68",
-        establecimiento_comuna: "Calama",
-        correo_establecimiento: "contacto@escuelamistralcalama.cl",
-        director: "Marcela Gómez Valdés",
-        correo_director: "mgomez@escuelamistral.cl",
-        tecnico_responsable: "Rodrigo Bravo",
-        estado: "Pendiente",
-        tipo_soporte: "Soporte Correctivo",
-        prioridad: "Urgente",
-        fecha_solicitud: "2026-08-20",
-        fecha_atencion: null,
-        fecha_programada: "2026-08-20",
-        fecha_realizada: null,
-        motivo: "Falla en enlace de fibra óptica interior y conmutación de switch de distribución de administración.",
-        detalle_hardware: { "red_ubiquiti": "EdgeSwitch 24 Lite", "impresoras": "Kyocera ECOSYS M2040dn" },
-        seguimiento_bitacora: [
-          { "fecha": "2026-08-20 11:15", "autor": "Rodrigo Bravo", "nota": "Diagnóstico inicial: Módulo SFP de fibra dañado por sobretensión." },
-          { "fecha": "2026-08-20 13:00", "autor": "Rodrigo Bravo", "nota": "Se deja en estado Pendiente a la espera de repuesto de módulo SFP monomodo." }
-        ],
-        observaciones_cierre: "Visita pausada: requiere reemplazo de módulo transceptor SFP y entrega de tóner Kyocera.",
-        firma_recepcion: null
-      },
-      {
-        id: 3,
-        rbd: 1027,
-        establecimiento_nombre: "Liceo Politécnico América",
-        establecimiento_comuna: "Calama",
-        correo_establecimiento: "liceo.america@calamaeduca.cl",
-        director: "Roberto Morales Peña",
-        correo_director: "rmorales@politecnicoamerica.cl",
-        tecnico_responsable: "Claudio Rojas",
-        estado: "En Proceso",
-        tipo_soporte: "Problemas de Conectividad",
-        prioridad: "Media",
-        fecha_solicitud: "2026-09-01",
-        fecha_atencion: "2026-09-01",
-        fecha_programada: "2026-09-01",
-        fecha_realizada: null,
-        motivo: "Revisión semestral de infraestructura tecnológica, rack principal y auditoría de red de laboratorios.",
-        detalle_hardware: { "red_ubiquiti": "UDM-Pro y Switch Pro 48 PoE" },
-        seguimiento_bitacora: [
-          { "fecha": "2026-09-01 10:00", "autor": "Claudio Rojas", "nota": "Inicio de auditoría de cableado estructurado y actualización de firmware en UDM-Pro." }
-        ],
-        observaciones_cierre: null,
-        firma_recepcion: null
-      },
-      {
-        id: 4,
-        rbd: 1028,
-        establecimiento_nombre: "Escuela Básica Bernardo O'Higgins E-42",
-        establecimiento_comuna: "Tocopilla",
-        correo_establecimiento: "e42.tocopilla@educacion.cl",
-        director: "Patricia Fuentes Jara",
-        correo_director: "pfuentes@escuelatocopilla.cl",
-        tecnico_responsable: "Sebastian Guevara",
-        estado: "Programada",
-        tipo_soporte: "Impresoras y Periféricos",
-        prioridad: "Baja",
-        fecha_solicitud: "2026-09-05",
-        fecha_atencion: null,
-        fecha_programada: "2026-09-05",
-        fecha_realizada: null,
-        motivo: "Instalación y configuración de 2 impresoras multifuncionales en sala de profesores y enlace a red docente.",
-        detalle_hardware: { "impresoras": "2x Brother DCP-L5650DN" },
-        seguimiento_bitacora: [
-          { "fecha": "2026-08-30 16:00", "autor": "Sebastian Guevara", "nota": "Visita coordinada con la dirección escolar." }
-        ],
-        observaciones_cierre: null,
-        firma_recepcion: null
+        observaciones_cierre: "Se realizó el despliegue de APs Ubiquiti UniFi y se verificó cobertura.",
+        firma_recepcion: "Director(a) Marta Brunet"
       }
     ];
-
 
     // --- FUNCIÓN AUXILIAR DE CLASIFICACIÓN ---
     function obtenerTipoEstablecimiento(e) {
@@ -1651,7 +1658,6 @@
       if (nom.includes('liceo') || nom.includes('instituto') || nom.includes('politécnico') || nom.includes('politecnico')) return 'Liceo';
       return 'Escuela';
     }
-
 
     // =========================================================================
     // 0. GESTIÓN DE SESIÓN Y AUTENTICACIÓN
@@ -1759,20 +1765,21 @@
         console.log("Validando credenciales en modo local.");
       }
 
-      // 2. Validación en modo local (si el backend no está disponible)
+      // 2. Validación en modo local
       if (!loginExitoso) {
         const emailLower = email.toLowerCase();
         if (
           (emailLower === 'admin@soporteti.cl' && password === 'admin123') ||
-          (emailLower === 'soporte@educacion.cl' && password === 'admin123') ||
-          (emailLower === 'admin@admin.cl' && password === 'admin123') ||
+          (emailLower === 'sguevara@eduvallediguillin.gob.cl' && password === 'admin123') ||
+          (emailLower === 'rbravo@eduvallediguillin.gob.cl' && password === 'admin123') ||
+          (emailLower === 'crojas@eduvallediguillin.gob.cl' && password === 'admin123') ||
           (email && password.length >= 4)
         ) {
           loginExitoso = true;
           userData = {
             id: 1,
             email: email,
-            nombre: "Administrador General",
+            nombre: emailLower.includes('sguevara') ? "Sebastian Guevara" : (emailLower.includes('rbravo') ? "Rodrigo Bravo" : (emailLower.includes('crojas') ? "Claudio Rojas" : "Administrador General TI")),
             rol: "Administrador TI"
           };
         } else {
@@ -1784,14 +1791,12 @@
         }
       }
 
-      // 3. Guardar sesión y entrar a la plataforma
       usuarioActual = userData;
       localStorage.setItem('soporte_ti_session', JSON.stringify(userData));
 
       mostrarToast(`¡Bienvenido/a, ${userData.nombre}!`, "success");
       mostrarAppPrincipal();
 
-      // Cargar datos
       await inicializarDatos();
       actualizarDashboard();
       renderizarVisitas();
@@ -1823,13 +1828,10 @@
       }
     }
 
-
     // --- INICIALIZACIÓN DE LA APLICACIÓN ---
     document.addEventListener('DOMContentLoaded', async () => {
-      // Probar conectividad con API
       await probarConectividadAPI();
 
-      // Verificar si hay sesión iniciada
       const sesionActiva = verificarSesion();
       if (sesionActiva) {
         await inicializarDatos();
@@ -1842,15 +1844,17 @@
       lucide.createIcons();
     });
 
-    async function probarConectividadAPI() {
+    async function probarConectividadAPI(notificar = false) {
       const posiblesBases = ['', 'http://127.0.0.1:8080', 'http://localhost:8080', 'http://127.0.0.1:8000', 'http://localhost:8000', 'http://127.0.0.1:8001', 'http://localhost:8001'];
       apiDisponible = false;
       API_BASE = '';
+      dbStatusData = null;
 
       for (const base of posiblesBases) {
         try {
-          const resHealth = await fetch(`${base}/api/health`, { cache: 'no-store' });
-          if (resHealth.ok) {
+          const resDb = await fetch(`${base}/api/db/status`, { cache: 'no-store' });
+          if (resDb.ok) {
+            dbStatusData = await resDb.json();
             API_BASE = base;
             apiDisponible = true;
             break;
@@ -1858,16 +1862,71 @@
         } catch (e) {}
       }
 
+      const banner = document.getElementById('banner-alerta-desconectado');
       const badge = document.getElementById('badge-modo-conexion');
-      if (badge) {
-        if (apiDisponible) {
-          badge.innerHTML = '● API Conectada (FastAPI)';
-          badge.className = 'text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700';
-        } else {
-          badge.innerHTML = '● Modo Autónomo (Local)';
-          badge.className = 'text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700';
+      const txtBadge = document.getElementById('texto-modo-conexion');
+
+      if (apiDisponible && dbStatusData) {
+        if (banner) banner.classList.add('hidden');
+        if (badge && txtBadge) {
+          const isPg = dbStatusData.engine === 'PostgreSQL';
+          badge.className = isPg 
+            ? 'text-[10px] font-semibold px-2.5 py-1 rounded-full bg-blue-950 text-blue-300 border border-blue-700 flex items-center gap-1.5 cursor-pointer hover:bg-blue-900/80 transition'
+            : 'text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center gap-1.5 cursor-pointer hover:bg-emerald-900/80 transition';
+          txtBadge.innerText = isPg ? '● PostgreSQL Supabase' : '● BD SQLite Central';
         }
+        if (notificar) mostrarToast(`Conectado exitosamente al servidor (${dbStatusData.engine_display})`, "success");
+      } else {
+        if (banner) banner.classList.remove('hidden');
+        if (badge && txtBadge) {
+          badge.className = 'text-[10px] font-semibold px-2.5 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-700 flex items-center gap-1.5 cursor-pointer hover:bg-rose-900/80 transition';
+          txtBadge.innerText = '● Sin Conexión Servidor';
+        }
+        if (notificar) mostrarToast("No se pudo conectar al backend. Verifica que python backend/server.py esté corriendo.", "error");
       }
+      lucide.createIcons();
+    }
+
+    function abrirModalEstadoDB() {
+      const modal = document.getElementById('modal-estado-db');
+      if (!modal) return;
+
+      const engineEl = document.getElementById('db-info-engine');
+      const targetEl = document.getElementById('db-info-target');
+      const badgeEl = document.getElementById('db-info-badge');
+      const cardEl = document.getElementById('db-status-card');
+      const countEst = document.getElementById('db-count-est');
+      const countVis = document.getElementById('db-count-vis');
+      const countUsr = document.getElementById('db-count-usr');
+
+      if (apiDisponible && dbStatusData) {
+        const isPg = dbStatusData.engine === 'PostgreSQL';
+        engineEl.innerText = dbStatusData.engine_display || (isPg ? "PostgreSQL (Supabase)" : "SQLite Local");
+        targetEl.innerText = dbStatusData.target || (isPg ? "Conexión PostgreSQL Activa" : "sqlite:///database/soporte_ti.db");
+        badgeEl.innerText = "Conectado";
+        badgeEl.className = isPg 
+          ? "px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300"
+          : "px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300";
+        cardEl.className = isPg 
+          ? "p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2"
+          : "p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2";
+        
+        countEst.innerText = dbStatusData.establecimientos_count || establecimientos.length;
+        countVis.innerText = dbStatusData.visitas_count || visitas.length;
+        countUsr.innerText = dbStatusData.usuarios_count || 4;
+      } else {
+        engineEl.innerText = "Servidor Desconectado";
+        targetEl.innerText = "El backend REST API no está respondiendo en el puerto 8080/8000.";
+        badgeEl.innerText = "Desconectado";
+        badgeEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300";
+        cardEl.className = "p-4 bg-rose-50 rounded-xl border border-rose-200 space-y-2";
+        countEst.innerText = establecimientos.length;
+        countVis.innerText = visitas.length;
+        countUsr.innerText = "-";
+      }
+
+      modal.classList.remove('hidden');
+      lucide.createIcons();
     }
 
     async function inicializarDatos() {
@@ -1892,7 +1951,6 @@
               }));
             }
           }
-          // Mantener respaldo en localStorage
           localStorage.setItem('soporte_ti_establecimientos', JSON.stringify(establecimientos));
           localStorage.setItem('soporte_ti_visitas', JSON.stringify(visitas));
           return;
@@ -1901,50 +1959,21 @@
         }
       }
 
-      // 2. Modo Autónomo LocalStorage / Fallback
-      apiDisponible = false;
-      const badge = document.getElementById('badge-modo-conexion');
-      if (badge) {
-        badge.innerHTML = '● Modo Autónomo (Local)';
-        badge.className = 'text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700';
-      }
-
+      // Fallback
       const estLocal = localStorage.getItem('soporte_ti_establecimientos');
       const visLocal = localStorage.getItem('soporte_ti_visitas');
 
       if (estLocal) {
-        try {
-          establecimientos = JSON.parse(estLocal);
-        } catch (e) {
-          establecimientos = JSON.parse(JSON.stringify(SEED_ESTABLECIMIENTOS));
-        }
+        try { establecimientos = JSON.parse(estLocal); } catch (e) { establecimientos = JSON.parse(JSON.stringify(SEED_ESTABLECIMIENTOS)); }
       } else {
         establecimientos = JSON.parse(JSON.stringify(SEED_ESTABLECIMIENTOS));
       }
 
       if (visLocal) {
-        try {
-          const parsed = JSON.parse(visLocal);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            visitas = parsed.map(v => ({
-              ...v,
-              fecha_solicitud: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
-              fecha_atencion: v.estado === 'Pendiente' ? null : (v.fecha_atencion || v.fecha_realizada || null),
-              fecha_programada: v.fecha_solicitud || v.fecha_programada || new Date().toISOString().split('T')[0],
-              fecha_realizada: (v.estado !== 'Pendiente' && (v.fecha_atencion || v.fecha_realizada)) ? (v.fecha_atencion || v.fecha_realizada) : null
-            }));
-          } else {
-            visitas = JSON.parse(JSON.stringify(SEED_VISITAS));
-          }
-        } catch (e) {
-          visitas = JSON.parse(JSON.stringify(SEED_VISITAS));
-        }
+        try { visitas = JSON.parse(visLocal); } catch (e) { visitas = JSON.parse(JSON.stringify(SEED_VISITAS)); }
       } else {
         visitas = JSON.parse(JSON.stringify(SEED_VISITAS));
       }
-
-      localStorage.setItem('soporte_ti_establecimientos', JSON.stringify(establecimientos));
-      localStorage.setItem('soporte_ti_visitas', JSON.stringify(visitas));
     }
 
     function guardarEnLocalStorage() {
@@ -1953,21 +1982,19 @@
     }
 
     async function sincronizarTodo() {
+      await probarConectividadAPI();
       await inicializarDatos();
       actualizarDashboard();
       renderizarVisitas();
       renderizarEstablecimientos();
       actualizarReporte();
       actualizarGraficos();
-      mostrarToast("Datos actualizados correctamente", "success");
+      mostrarToast("Datos actualizados correctamente desde el servidor central", "success");
     }
 
     function restaurarDatosSemilla() {
-      if (!confirm("¿Deseas restaurar los datos semilla iniciales y limpiar la memoria caché local?")) return;
-      localStorage.removeItem('soporte_ti_establecimientos');
-      localStorage.removeItem('soporte_ti_visitas');
+      if (!confirm("¿Deseas sincronizar y recargar la base de datos oficial?")) return;
       sincronizarTodo();
-      mostrarToast("Datos restablecidos a la versión inicial", "success");
     }
 
     // --- NAVEGACIÓN POR PESTAÑAS (TABS) ---
@@ -2758,10 +2785,12 @@
                 visitaResultado = await res.json();
                 visitas[index] = { ...datosActualizados, ...visitaResultado };
               } else {
-                visitas[index] = datosActualizados;
+                const errData = await res.json().catch(() => ({}));
+                mostrarToast(errData.detail || "Error al actualizar en el servidor de base de datos", "error");
+                return null;
               }
             } catch (e) {
-              console.error("Error al actualizar en backend:", e);
+              console.error("Error de red al actualizar en backend:", e);
               visitas[index] = datosActualizados;
             }
           } else {
@@ -2769,7 +2798,7 @@
           }
 
           if (!visitaResultado) visitaResultado = visitas[index];
-          mostrarToast(`Visita #${id} actualizada con éxito: ${visitas[index].establecimiento_nombre}`, 'success');
+          mostrarToast(`Visita #${id} actualizada con éxito en la base de datos`, 'success');
         }
       } else {
         // Crear nueva
@@ -2778,7 +2807,7 @@
           id: newId,
           ...payload,
           establecimiento_nombre: est ? est.nombre : `RBD ${rbd}`,
-          establecimiento_comuna: est ? est.comuna : 'Regional',
+          establecimiento_comuna: est ? est.comuna : 'Chillán',
           correo_establecimiento: est ? est.correo_establecimiento : '',
           director: est ? est.director : '',
           correo_director: est ? est.correo_director : '',
@@ -2800,10 +2829,12 @@
               visitaResultado = await res.json();
               visitas.unshift(visitaResultado);
             } else {
-              visitaResultado = nuevaVisita;
-              visitas.unshift(nuevaVisita);
+              const errData = await res.json().catch(() => ({}));
+              mostrarToast(errData.detail || "Error al registrar la visita en el servidor", "error");
+              return null;
             }
           } catch (e) {
+            console.error("Error de red:", e);
             visitaResultado = nuevaVisita;
             visitas.unshift(nuevaVisita);
           }
@@ -2811,7 +2842,7 @@
           visitaResultado = nuevaVisita;
           visitas.unshift(nuevaVisita);
         }
-        mostrarToast("Nueva visita registrada correctamente", "success");
+        mostrarToast("Nueva visita registrada correctamente en la base de datos", "success");
       }
 
       guardarEnLocalStorage();
@@ -3465,28 +3496,38 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
         // Actualizar
         if (apiDisponible) {
           try {
-            await fetch(`${API_BASE}/api/establecimientos/${rbd}`, {
+            const res = await fetch(`${API_BASE}/api/establecimientos/${rbd}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
             });
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              mostrarToast(errData.detail || "Error al actualizar establecimiento", "error");
+              return;
+            }
           } catch (e) { console.error(e); }
         }
         establecimientos[existeIndex] = { ...establecimientos[existeIndex], ...payload };
-        mostrarToast(`Establecimiento RBD ${rbd} actualizado`, "success");
+        mostrarToast(`Establecimiento RBD ${rbd} actualizado en la base de datos`, "success");
       } else {
         // Crear
         if (apiDisponible) {
           try {
-            await fetch(`${API_BASE}/api/establecimientos`, {
+            const res = await fetch(`${API_BASE}/api/establecimientos`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
             });
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              mostrarToast(errData.detail || "Error al registrar establecimiento", "error");
+              return;
+            }
           } catch (e) { console.error(e); }
         }
         establecimientos.unshift(payload);
-        mostrarToast(`Nuevo establecimiento RBD ${rbd} guardado`, "success");
+        mostrarToast(`Nuevo establecimiento RBD ${rbd} guardado en la base de datos`, "success");
       }
 
       guardarEnLocalStorage();
@@ -3500,7 +3541,12 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
 
       if (apiDisponible) {
         try {
-          await fetch(`${API_BASE}/api/establecimientos/${rbd}`, { method: 'DELETE' });
+          const res = await fetch(`${API_BASE}/api/establecimientos/${rbd}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            mostrarToast(errData.detail || "No se pudo eliminar el establecimiento", "error");
+            return;
+          }
         } catch (e) { console.error(e); }
       }
 
@@ -3508,7 +3554,7 @@ Conserve el ID de Atención ${idAtencion} para su seguimiento.`;
       guardarEnLocalStorage();
       renderizarEstablecimientos();
       actualizarDashboard();
-      mostrarToast(`Establecimiento RBD ${rbd} eliminado`, "info");
+      mostrarToast(`Establecimiento RBD ${rbd} procesado correctamente`, "info");
     }
 
     // --- INTEGRACIÓN CON EXCEL (IMPORT & EXPORT CON SHEETJS) ---

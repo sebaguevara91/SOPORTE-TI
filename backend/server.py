@@ -1,29 +1,38 @@
 """
 Servidor Backend REST API - Plataforma de Registro de Visitas de Soporte TI
-Provee endpoints para gestión de establecimientos, visitas técnicas, bitácora de seguimiento, importación y métricas para el dashboard.
-Compatible con FastAPI y SQLite (incluye inicialización automática de esquema).
+SLEP Valle Diguillín
+
+Provee endpoints para gestión de establecimientos, visitas técnicas, bitácora de seguimiento,
+notificaciones por correo, importación Excel, reportería y sincronización de base de datos.
+Compatible con PostgreSQL (Supabase / Central) y SQLite (Local).
 """
 
 import os
+import sys
 import re
 import json
-import sqlite3
 import unicodedata
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 from contextlib import asynccontextmanager
 
+# --- RUTAS BASE Y CONFIGURACIÓN DE SYS.PATH ---
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# Importar DatabaseManager de forma segura
+try:
+    from backend.db import db
+except ImportError:
+    from db import db
+
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-# --- RUTAS BASE Y CONFIGURACIÓN ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "database", "soporte_ti.db")
-SCHEMA_PATH = os.path.join(BASE_DIR, "database", "schema.sql")
-SEEDS_PATH = os.path.join(BASE_DIR, "database", "seeds.sql")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 
@@ -40,134 +49,30 @@ if os.path.exists(ENV_PATH):
                     if key and key not in os.environ:
                         os.environ[key] = val
         print("[CONFIG] Variables de entorno cargadas desde archivo .env")
+        db.reload_config()
     except Exception as e:
         print(f"[CONFIG] Error al leer .env: {e}")
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Crea y retorna una conexión a la base de datos SQLite."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
 def init_db():
-    """Inicializa la estructura de tablas y solo inserta semillas si la base de datos está totalmente vacía."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = get_db_connection()
-
-    # 1. Crear tablas e índices si no existen
-    if os.path.exists(SCHEMA_PATH):
-        with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-            conn.executescript(f.read())
-
-    # 2. Migración segura previa: si la tabla ya existía sin columnas nuevas
+    """Inicializa la estructura de tablas y asegura usuario administrador por defecto."""
     try:
-        cur = conn.cursor()
-        cur.execute("PRAGMA table_info(establecimientos)")
-        cols_est = [row[1] for row in cur.fetchall()]
-        if cols_est and "correo_establecimiento" not in cols_est:
-            conn.execute("ALTER TABLE establecimientos ADD COLUMN correo_establecimiento VARCHAR(150)")
-        if cols_est and "tipo_establecimiento" not in cols_est:
-            conn.execute("ALTER TABLE establecimientos ADD COLUMN tipo_establecimiento VARCHAR(50) DEFAULT 'Escuela'")
-        conn.commit()
-
-        # Auto-clasificación de establecimientos existentes según su nombre
-        conn.execute("""
-            UPDATE establecimientos SET tipo_establecimiento = 'Liceo'
-            WHERE (tipo_establecimiento IS NULL OR tipo_establecimiento = 'Escuela')
-              AND (LOWER(nombre) LIKE '%liceo%' OR LOWER(nombre) LIKE '%instituto%' OR LOWER(nombre) LIKE '%politécnico%' OR LOWER(nombre) LIKE '%politecnico%')
-        """)
-        conn.execute("""
-            UPDATE establecimientos SET tipo_establecimiento = 'Sala Cuna'
-            WHERE (tipo_establecimiento IS NULL OR tipo_establecimiento = 'Escuela')
-              AND (LOWER(nombre) LIKE '%sala cuna%' OR LOWER(nombre) LIKE '%salacuna%' OR LOWER(nombre) LIKE '%jardín%' OR LOWER(nombre) LIKE '%jardin%')
-        """)
-        conn.commit()
-
-        # Migración de tabla visitas: fecha_solicitud y fecha_atencion
-        cur.execute("PRAGMA table_info(visitas)")
-        cols_vis = [row[1] for row in cur.fetchall()]
-        if cols_vis and "fecha_solicitud" not in cols_vis:
-            conn.execute("ALTER TABLE visitas ADD COLUMN fecha_solicitud DATE")
-        if cols_vis and "fecha_atencion" not in cols_vis:
-            conn.execute("ALTER TABLE visitas ADD COLUMN fecha_atencion VARCHAR(50)")
-        conn.commit()
-
-        # Población inicial / normalización de fechas
-        conn.execute("""
-            UPDATE visitas 
-            SET fecha_solicitud = fecha_programada 
-            WHERE fecha_solicitud IS NULL AND fecha_programada IS NOT NULL
-        """)
-        conn.execute("""
-            UPDATE visitas 
-            SET fecha_programada = fecha_solicitud 
-            WHERE fecha_programada IS NULL AND fecha_solicitud IS NOT NULL
-        """)
-        conn.execute("""
-            UPDATE visitas 
-            SET fecha_atencion = fecha_realizada 
-            WHERE fecha_atencion IS NULL AND fecha_realizada IS NOT NULL AND estado != 'Pendiente'
-        """)
-        conn.execute("""
-            UPDATE visitas 
-            SET fecha_realizada = fecha_atencion 
-            WHERE fecha_realizada IS NULL AND fecha_atencion IS NOT NULL AND estado != 'Pendiente'
-        """)
-        # Para registros Pendientes: la fecha programada es la fecha de solicitud, y la fecha de atención es NULL
-        conn.execute("""
-            UPDATE visitas 
-            SET fecha_atencion = NULL, fecha_realizada = NULL 
-            WHERE estado = 'Pendiente'
-        """)
-        conn.commit()
-    except Exception as e:
-        print(f"[DB] Advertencia en migración: {e}")
-
-    # 3. Crear tabla usuarios si no existe y asegurar usuario admin por defecto
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email VARCHAR(150) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                nombre VARCHAR(150) NOT NULL,
-                rol VARCHAR(50) DEFAULT 'Administrador TI',
-                activo INTEGER DEFAULT 1 CHECK (activo IN (0, 1)),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        db.init_schema()
+        usr = db.query_one("SELECT COUNT(*) as c FROM usuarios")
+        if not usr or usr["c"] == 0:
+            db.execute(
+                """
+                INSERT INTO usuarios (email, password, nombre, rol, activo)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ('admin@soporteti.cl', 'admin123', 'Administrador General TI', 'Administrador TI', 1)
             )
-        """)
-        total_usr = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
-        if total_usr == 0:
-            conn.execute(
-                "INSERT INTO usuarios (email, password, nombre, rol, activo) VALUES (?, ?, ?, ?, ?)",
-                ('admin@soporteti.cl', 'admin123', 'Administrador General', 'Administrador TI', 1)
-            )
-            conn.commit()
             print("[AUTH] Usuario administrador por defecto inicializado (admin@soporteti.cl / admin123).")
+        
+        status_info = db.get_status()
+        print(f"[DB] Base de datos conectada ({status_info.get('engine_display')}): {status_info.get('establecimientos_count')} colegios, {status_info.get('visitas_count')} visitas.")
     except Exception as e:
-        print(f"[AUTH] Advertencia en inicialización de usuarios: {e}")
-
-    # 4. Si la base de datos está vacía o tiene datos incompletos (< 20 establecimientos o < 10 visitas), cargar semillas completas de Valle Diguillín
-    try:
-        total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
-        total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
-        if (total_est < 20 or total_vis < 10) and os.path.exists(SEEDS_PATH):
-            with open(SEEDS_PATH, "r", encoding="utf-8") as f:
-                conn.executescript(f.read())
-            conn.commit()
-            total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
-            total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
-            print(f"[DB] Base de datos sincronizada exitosamente: {total_est} establecimientos y {total_vis} visitas cargadas.")
-        else:
-            print(f"[DB] Base de datos cargada ({total_est} establecimientos y {total_vis} visitas conservadas).")
-    except Exception as e:
-        print(f"[DB] Advertencia al verificar datos iniciales: {e}")
-
-    conn.commit()
-    conn.close()
+        print(f"[DB] Advertencia al inicializar base de datos: {e}")
 
 
 # --- ESQUEMAS PYDANTIC ---
@@ -204,8 +109,8 @@ class EstablecimientoUpdate(BaseModel):
 
 
 class EstablecimientoResponse(EstablecimientoBase):
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
 
 
 class NotaBitacora(BaseModel):
@@ -221,9 +126,9 @@ class VisitaBase(BaseModel):
     tipo_soporte: Optional[str] = Field("Soporte Correctivo", description="Categoría de la atención técnica")
     prioridad: Optional[str] = Field("Media", description="Baja, Media, Alta o Urgente")
     fecha_solicitud: Optional[str] = Field(None, description="Fecha en la que se solicitó la atención (YYYY-MM-DD)")
-    fecha_atencion: Optional[str] = Field(None, description="Fecha en que se atendió/gestionó el caso (YYYY-MM-DD o YYYY-MM-DD HH:MM)")
+    fecha_atencion: Optional[Any] = Field(None, description="Fecha en que se atendió el caso")
     fecha_programada: Optional[str] = Field(None, description="Fecha asignada / solicitud (compatibilidad)")
-    fecha_realizada: Optional[str] = Field(None, description="Fecha de cierre/atención (compatibilidad)")
+    fecha_realizada: Optional[Any] = Field(None, description="Fecha de cierre/atención (compatibilidad)")
     motivo: str = Field(..., description="Descripción del requerimiento o falla")
     detalle_hardware: Optional[Union[Dict[str, Any], str]] = Field(None, description="Equipamiento intervenido")
     seguimiento_bitacora: Optional[Union[List[Dict[str, Any]], str]] = Field(None, description="Historial de seguimiento")
@@ -242,9 +147,9 @@ class VisitaUpdate(BaseModel):
     tipo_soporte: Optional[str] = None
     prioridad: Optional[str] = None
     fecha_solicitud: Optional[str] = None
-    fecha_atencion: Optional[str] = None
+    fecha_atencion: Optional[Any] = None
     fecha_programada: Optional[str] = None
-    fecha_realizada: Optional[str] = None
+    fecha_realizada: Optional[Any] = None
     motivo: Optional[str] = None
     detalle_hardware: Optional[Union[Dict[str, Any], str]] = None
     seguimiento_bitacora: Optional[Union[List[Dict[str, Any]], str]] = None
@@ -254,8 +159,8 @@ class VisitaUpdate(BaseModel):
 
 class VisitaResponse(VisitaBase):
     id: int
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
     establecimiento_nombre: Optional[str] = None
     establecimiento_comuna: Optional[str] = None
     correo_establecimiento: Optional[str] = None
@@ -291,8 +196,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="API - Plataforma de Registro de Visitas y Soporte TI",
-    description="Backend API REST para gestión de colegios, visitas técnicas, reportería y sincronización",
-    version="2.0.0",
+    description="Backend API REST con soporte unificado PostgreSQL / SQLite para SLEP Valle Diguillín",
+    version="2.1.0",
     lifespan=lifespan
 )
 
@@ -305,21 +210,30 @@ app.add_middleware(
 )
 
 
-# --- ENDPOINTS API ---
+# --- ENDPOINTS SISTEMA Y BASE DE DATOS ---
 
 @app.get("/api/health", tags=["Sistema"])
 def health_check():
-    """Verificación de estado del servicio y conectividad de base de datos."""
-    try:
-        conn = get_db_connection()
-        conn.execute("SELECT 1")
-        conn.close()
-        return {"status": "ok", "database": "connected", "timestamp": datetime.now().isoformat()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
+    """Verificación de estado del servicio y conectividad."""
+    st = db.get_status()
+    if st.get("status") == "connected":
+        return {
+            "status": "ok",
+            "database": "connected",
+            "engine": st.get("engine"),
+            "engine_display": st.get("engine_display"),
+            "timestamp": datetime.now().isoformat()
+        }
+    raise HTTPException(status_code=500, detail=f"Database error: {st.get('error')}")
 
 
-# 0. AUTENTICACIÓN Y USUARIOS
+@app.get("/api/db/status", tags=["Sistema"])
+def get_database_status():
+    """Retorna información detallada del motor de base de datos activo y estadísticas."""
+    return db.get_status()
+
+
+# --- AUTENTICACIÓN Y USUARIOS ---
 
 @app.post("/api/auth/login", response_model=LoginResponse, tags=["Autenticación"])
 def login_usuario(req: LoginRequest):
@@ -327,14 +241,11 @@ def login_usuario(req: LoginRequest):
     email_clean = req.email.strip().lower()
     pass_clean = req.password.strip()
 
-    conn = get_db_connection()
-    user = conn.execute(
+    user = db.query_one(
         "SELECT id, email, password, nombre, rol FROM usuarios WHERE LOWER(email) = ? AND activo = 1",
         (email_clean,)
-    ).fetchone()
-    conn.close()
+    )
 
-    # Validar credenciales contra la BD o credencial por defecto
     if user and user["password"] == pass_clean:
         usuario_info = {
             "id": user["id"],
@@ -363,10 +274,8 @@ def login_usuario(req: LoginRequest):
 
 @app.get("/api/auth/me", response_model=UsuarioResponse, tags=["Autenticación"])
 def obtener_usuario_actual():
-    """Obtiene el perfil del usuario autenticado."""
-    conn = get_db_connection()
-    user = conn.execute("SELECT id, email, nombre, rol FROM usuarios WHERE activo = 1 LIMIT 1").fetchone()
-    conn.close()
+    """Obtiene el perfil del usuario administrador/técnico por defecto."""
+    user = db.query_one("SELECT id, email, nombre, rol FROM usuarios WHERE activo = 1 LIMIT 1")
     if user:
         return dict(user)
     return {
@@ -377,7 +286,7 @@ def obtener_usuario_actual():
     }
 
 
-# 1. ESTABLECIMIENTOS (CRUD)
+# --- 1. ESTABLECIMIENTOS (CRUD) ---
 
 @app.get("/api/establecimientos", response_model=List[EstablecimientoResponse], tags=["Establecimientos"])
 def listar_establecimientos(
@@ -385,8 +294,7 @@ def listar_establecimientos(
     tipo: Optional[str] = Query(None, description="Filtrar por tipo (Liceo, Escuela, Sala Cuna)"),
     buscar: Optional[str] = Query(None, description="Búsqueda por nombre o RBD")
 ):
-    """Obtiene la lista de establecimientos educativos."""
-    conn = get_db_connection()
+    """Obtiene la lista de establecimientos educativos activos."""
     query = "SELECT * FROM establecimientos WHERE activo = 1"
     params = []
 
@@ -403,51 +311,42 @@ def listar_establecimientos(
         params.extend([f"%{buscar}%", f"%{buscar}%", f"%{buscar}%", f"%{buscar}%", f"%{buscar}%", f"%{buscar}%"])
 
     query += " ORDER BY nombre ASC"
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    rows = db.query(query, params)
+    return rows
 
 
 @app.get("/api/establecimientos/{rbd}", response_model=EstablecimientoResponse, tags=["Establecimientos"])
 def obtener_establecimiento(rbd: int):
     """Obtiene el detalle de un establecimiento por su RBD."""
-    conn = get_db_connection()
-    row = conn.execute("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,)).fetchone()
-    conn.close()
+    row = db.query_one("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,))
     if not row:
         raise HTTPException(status_code=404, detail=f"Establecimiento con RBD {rbd} no encontrado.")
-    return dict(row)
+    return row
 
 
 @app.post("/api/establecimientos", response_model=EstablecimientoResponse, status_code=status.HTTP_201_CREATED, tags=["Establecimientos"])
 def crear_establecimiento(est: EstablecimientoBase):
     """Registra un nuevo establecimiento escolar."""
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            """
-            INSERT INTO establecimientos (rbd, nombre, comuna, direccion, correo_establecimiento, director, correo_director, telefono, matricula, dependencia, contacto_enlaces, tipo_establecimiento, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (est.rbd, est.nombre, est.comuna, est.direccion, est.correo_establecimiento, est.director, est.correo_director, est.telefono, est.matricula, est.dependencia, est.contacto_enlaces, est.tipo_establecimiento or 'Escuela', est.activo)
-        )
-        conn.commit()
-    except sqlite3.IntegrityError:
-        conn.close()
+    existe = db.query_one("SELECT rbd FROM establecimientos WHERE rbd = ?", (est.rbd,))
+    if existe:
         raise HTTPException(status_code=400, detail=f"El establecimiento con RBD {est.rbd} ya existe.")
+
+    db.execute(
+        """
+        INSERT INTO establecimientos (rbd, nombre, comuna, direccion, correo_establecimiento, director, correo_director, telefono, matricula, dependencia, contacto_enlaces, tipo_establecimiento, activo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (est.rbd, est.nombre, est.comuna, est.direccion, est.correo_establecimiento, est.director, est.correo_director, est.telefono, est.matricula, est.dependencia, est.contacto_enlaces, est.tipo_establecimiento or 'Escuela', est.activo)
+    )
     
-    row = conn.execute("SELECT * FROM establecimientos WHERE rbd = ?", (est.rbd,)).fetchone()
-    conn.close()
-    return dict(row)
+    return db.query_one("SELECT * FROM establecimientos WHERE rbd = ?", (est.rbd,))
 
 
 @app.put("/api/establecimientos/{rbd}", response_model=EstablecimientoResponse, tags=["Establecimientos"])
 def actualizar_establecimiento(rbd: int, datos: EstablecimientoUpdate):
     """Actualiza los datos de un establecimiento existente."""
-    conn = get_db_connection()
-    actual = conn.execute("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,)).fetchone()
+    actual = db.query_one("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,))
     if not actual:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"Establecimiento con RBD {rbd} no encontrado.")
 
     update_fields = []
@@ -461,46 +360,36 @@ def actualizar_establecimiento(rbd: int, datos: EstablecimientoUpdate):
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
         query = f"UPDATE establecimientos SET {', '.join(update_fields)} WHERE rbd = ?"
         params.append(rbd)
-        conn.execute(query, params)
-        conn.commit()
+        db.execute(query, params)
 
-    row = conn.execute("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,)).fetchone()
-    conn.close()
-    return dict(row)
+    return db.query_one("SELECT * FROM establecimientos WHERE rbd = ?", (rbd,))
 
 
 @app.delete("/api/establecimientos/{rbd}", status_code=status.HTTP_200_OK, tags=["Establecimientos"])
 def eliminar_establecimiento(rbd: int):
     """Elimina o desactiva un establecimiento escolar."""
-    conn = get_db_connection()
-    # Verificar si tiene visitas asociadas
-    visitas_count = conn.execute("SELECT COUNT(*) FROM visitas WHERE rbd = ?", (rbd,)).fetchone()[0]
+    visitas_count = db.query_one("SELECT COUNT(*) as c FROM visitas WHERE rbd = ?", (rbd,))["c"]
     if visitas_count > 0:
         # Soft delete para proteger integridad referencial
-        conn.execute("UPDATE establecimientos SET activo = 0, updated_at = CURRENT_TIMESTAMP WHERE rbd = ?", (rbd,))
-        conn.commit()
-        conn.close()
+        db.execute("UPDATE establecimientos SET activo = 0, updated_at = CURRENT_TIMESTAMP WHERE rbd = ?", (rbd,))
         return {"message": f"Establecimiento con RBD {rbd} archivado (posee {visitas_count} visitas asociadas)."}
     
-    res = conn.execute("DELETE FROM establecimientos WHERE rbd = ?", (rbd,))
-    conn.commit()
-    conn.close()
-    if res.rowcount == 0:
+    res = db.execute("DELETE FROM establecimientos WHERE rbd = ?", (rbd,))
+    if res == 0:
         raise HTTPException(status_code=404, detail=f"Establecimiento con RBD {rbd} no encontrado.")
     return {"message": f"Establecimiento con RBD {rbd} eliminado correctamente."}
 
 
 @app.post("/api/establecimientos/bulk", tags=["Establecimientos"])
 def importar_establecimientos_masivo(lista: List[EstablecimientoBase]):
-    """Importa o actualiza un lote masivo de establecimientos (desde Excel/CSV)."""
-    conn = get_db_connection()
+    """Importa o actualiza un lote masivo de establecimientos."""
     insertados = 0
     actualizados = 0
 
     for est in lista:
-        existe = conn.execute("SELECT rbd FROM establecimientos WHERE rbd = ?", (est.rbd,)).fetchone()
+        existe = db.query_one("SELECT rbd FROM establecimientos WHERE rbd = ?", (est.rbd,))
         if existe:
-            conn.execute(
+            db.execute(
                 """
                 UPDATE establecimientos SET
                     nombre=?, comuna=?, direccion=?, correo_establecimiento=?, director=?, correo_director=?,
@@ -511,7 +400,7 @@ def importar_establecimientos_masivo(lista: List[EstablecimientoBase]):
             )
             actualizados += 1
         else:
-            conn.execute(
+            db.execute(
                 """
                 INSERT INTO establecimientos (rbd, nombre, comuna, direccion, correo_establecimiento, director, correo_director, telefono, matricula, dependencia, contacto_enlaces, tipo_establecimiento, activo)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -520,12 +409,10 @@ def importar_establecimientos_masivo(lista: List[EstablecimientoBase]):
             )
             insertados += 1
 
-    conn.commit()
-    conn.close()
     return {"status": "ok", "insertados": insertados, "actualizados": actualizados, "total": len(lista)}
 
 
-# 2. VISITAS TÉCNICAS Y SEGUIMIENTO (CRUD)
+# --- 2. VISITAS TÉCNICAS Y SEGUIMIENTO (CRUD) ---
 
 @app.get("/api/visitas", response_model=List[VisitaResponse], tags=["Visitas"])
 def listar_visitas(
@@ -538,7 +425,6 @@ def listar_visitas(
     orden: Optional[str] = Query("desc", description="Orden por fecha: 'desc' o 'asc'")
 ):
     """Lista las visitas técnicas registradas con filtros avanzados y orden configurable."""
-    conn = get_db_connection()
     query = """
         SELECT 
             v.id, v.rbd, v.tecnico_responsable, v.estado, v.tipo_soporte, v.prioridad,
@@ -581,22 +467,25 @@ def listar_visitas(
 
     orden_dir = "ASC" if (isinstance(orden, str) and orden.lower() == "asc") else "DESC"
     query += f" ORDER BY COALESCE(v.fecha_solicitud, v.fecha_programada) {orden_dir}, v.id {orden_dir}"
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
+    rows = db.query(query, params)
 
     resultado = []
     for row in rows:
         item = dict(row)
-        if item.get("detalle_hardware"):
+        if item.get("detalle_hardware") and isinstance(item["detalle_hardware"], str):
             try:
                 item["detalle_hardware"] = json.loads(item["detalle_hardware"])
             except Exception:
                 pass
-        if item.get("seguimiento_bitacora"):
+        if item.get("seguimiento_bitacora") and isinstance(item["seguimiento_bitacora"], str):
             try:
                 item["seguimiento_bitacora"] = json.loads(item["seguimiento_bitacora"])
             except Exception:
                 pass
+        # Normalizar timestamps a strings ISO
+        for tf in ("fecha_solicitud", "fecha_atencion", "fecha_programada", "fecha_realizada", "created_at", "updated_at"):
+            if item.get(tf) and not isinstance(item[tf], str):
+                item[tf] = str(item[tf])
         resultado.append(item)
 
     return resultado
@@ -605,8 +494,7 @@ def listar_visitas(
 @app.get("/api/visitas/{visita_id}", response_model=VisitaResponse, tags=["Visitas"])
 def obtener_visita(visita_id: int):
     """Obtiene los datos detallados de una visita técnica por su ID."""
-    conn = get_db_connection()
-    row = conn.execute(
+    row = db.query_one(
         """
         SELECT 
             v.id, v.rbd, v.tecnico_responsable, v.estado, v.tipo_soporte, v.prioridad,
@@ -627,33 +515,33 @@ def obtener_visita(visita_id: int):
         WHERE v.id = ?
         """,
         (visita_id,)
-    ).fetchone()
-    conn.close()
+    )
 
     if not row:
         raise HTTPException(status_code=404, detail=f"Visita con ID {visita_id} no encontrada.")
 
     item = dict(row)
-    if item.get("detalle_hardware"):
+    if item.get("detalle_hardware") and isinstance(item["detalle_hardware"], str):
         try:
             item["detalle_hardware"] = json.loads(item["detalle_hardware"])
         except Exception:
             pass
-    if item.get("seguimiento_bitacora"):
+    if item.get("seguimiento_bitacora") and isinstance(item["seguimiento_bitacora"], str):
         try:
             item["seguimiento_bitacora"] = json.loads(item["seguimiento_bitacora"])
         except Exception:
             pass
+    for tf in ("fecha_solicitud", "fecha_atencion", "fecha_programada", "fecha_realizada", "created_at", "updated_at"):
+        if item.get(tf) and not isinstance(item[tf], str):
+            item[tf] = str(item[tf])
     return item
 
 
 @app.post("/api/visitas", response_model=VisitaResponse, status_code=status.HTTP_201_CREATED, tags=["Visitas"])
 def crear_visita(visita: VisitaCreate):
     """Crea una nueva visita técnica."""
-    conn = get_db_connection()
-    est = conn.execute("SELECT rbd FROM establecimientos WHERE rbd = ?", (visita.rbd,)).fetchone()
+    est = db.query_one("SELECT rbd FROM establecimientos WHERE rbd = ?", (visita.rbd,))
     if not est:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"El establecimiento con RBD {visita.rbd} no existe.")
 
     detalle_str = json.dumps(visita.detalle_hardware) if isinstance(visita.detalle_hardware, (dict, list)) else visita.detalle_hardware
@@ -666,8 +554,7 @@ def crear_visita(visita: VisitaCreate):
     elif visita.estado == "Realizada" and not f_atencion:
         f_atencion = f"{f_solicitud} 17:00:00"
 
-    cursor = conn.cursor()
-    cursor.execute(
+    new_id = db.execute(
         """
         INSERT INTO visitas (
             rbd, tecnico_responsable, estado, tipo_soporte, prioridad,
@@ -680,255 +567,23 @@ def crear_visita(visita: VisitaCreate):
             visita.rbd, visita.tecnico_responsable, visita.estado, visita.tipo_soporte, visita.prioridad,
             f_solicitud, f_atencion, f_solicitud, f_atencion,
             visita.motivo, detalle_str, bitacora_str, visita.observaciones_cierre, visita.firma_recepcion
-        )
+        ),
+        return_id=True
     )
-    new_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
 
     return obtener_visita(new_id)
-
-
-def inferir_categoria_soporte(texto: str) -> str:
-    """Clasifica inteligentemente la categoría de soporte técnico a partir del motivo o detalle."""
-    if not texto:
-        return "Soporte Correctivo"
-    t = str(texto).lower()
-    
-    # 1. Implementación de Servicios
-    if any(k in t for k in ["implementac", "servicio de internet", "servicios de internet", "nuevo proveedor", "sim card", "starlink", "conexion de servicio", "conexión de servicio", "habilitacion", "habilitación", "activacion", "activación", "despliegue", "gtd retira"]):
-        return "Implementación de Servicios"
-
-    # 2. Problemas de Conectividad (Reemplaza Redes Wi-Fi / Ubiquiti y Servidores y Redes)
-    if any(k in t for k in ["wifi", "wi-fi", "wi fi", "ap ", "ap,", "ap.", "access point", "unifi", "ubiquiti", "u6", "antena", "cobertura", "ssid", "señal", "conectividad", "corte", "caida", "caída", "sin internet", "intermiten", "switch", "switches", "rack", "fibra", "patch", "enlace", "vlan", "router", "puntos de red", "punto de red", "cableado", "datacenter", "mikrotik", "pfsense", "fortinet", "ip fija", "segmento", "gateway"]):
-        return "Problemas de Conectividad"
-        
-    # 3. Impresoras y Periféricos
-    if any(k in t for k in ["impresora", "impresoras", "toner", "tóner", "tinta", "cartucho", "escaner", "scanner", "fotocopiadora", "ricoh", "kyocera", "brother", "epson", "lexmark", "atasco", "hojas"]):
-        return "Impresoras y Periféricos"
-        
-    # 4. Entrega de Equipamiento
-    if any(k in t for k in ["entrega", "entregar", "recepcion", "donacion", "proyector", "data show", "telon", "pantalla interactiva", "notebook nuevo", "tablets", "computador nuevo"]):
-        return "Entrega de Equipamiento"
-        
-    # 5. Software y Sistemas
-    if any(k in t for k in ["formateo", "formatear", "windows", "office", "antivirus", "software", "sistema", "clave", "correo", "licencia", "actualizacion", "actualizar", "navegador", "sigie", "programa", "ofimatica", "so equipo", "educadoras", "clave wifi"]):
-        return "Software y Sistemas"
-        
-    # 6. Mantenimiento Preventivo
-    if any(k in t for k in ["preventivo", "mantenimiento", "mantencion", "limpieza", "soplar", "soplado", "revision periodica", "auditoria", "revision semestral"]):
-        return "Mantenimiento Preventivo"
-        
-    # 7. Por defecto: Soporte Correctivo
-    return "Soporte Correctivo"
-
-
-def normalizar_texto_colegio(texto: str):
-    """Normaliza el nombre de un colegio eliminando acentos y puntuación para búsqueda difusa."""
-    if not texto:
-        return "", set()
-    s = unicodedata.normalize("NFD", str(texto)).encode("ascii", "ignore").decode("utf-8").lower().strip()
-    s = re.sub(r"[^a-z0-9\s]", " ", s)
-    tokens = set(w for w in s.split() if len(w) > 2 and w not in ("del", "las", "los", "san", "santa", "escuela", "liceo", "colegio"))
-    return s, tokens
-
-
-def normalizar_estado_visita(estado_raw: Any, fecha_realizada: str = None) -> str:
-    """Mapea cualquier variación de estado a los oficiales: Pendiente, En Proceso, Realizada, Programada.
-    Asimila 'No Realizado', 'No Realizada', 'No', 'Pendiente', etc. como 'Pendiente'."""
-    if estado_raw is None:
-        return "Realizada" if fecha_realizada else "Pendiente"
-    
-    e = str(estado_raw).lower().strip()
-    if not e:
-        return "Realizada" if fecha_realizada else "Pendiente"
-    
-    # 1. EVALUAR NEGATIVAS PRIMERO (No Realizado -> Pendiente)
-    if (
-        e in ("no", "n", "false", "falso", "0") or
-        any(k in e for k in [
-            "no realiz", "no se realiz", "sin realiz", "no ejecut", "no finaliz",
-            "no efect", "no atend", "no asist", "no conclui", "pendien",
-            "paus", "espera", "incomplet", "fallid", "suspend", "cancel", "posterg"
-        ])
-    ):
-        return "Pendiente"
-    
-    # 2. EN PROCESO
-    if any(k in e for k in ["proceso", "curso", "terreno", "atendiendo"]):
-        return "En Proceso"
-        
-    # 3. PROGRAMADA
-    if any(k in e for k in ["program", "agend", "planific", "coordinad"]):
-        return "Programada"
-        
-    # 4. REALIZADA
-    if (
-        e in ("si", "sí", "true", "1") or
-        any(k in e for k in ["realiz", "finaliz", "complet", "ok", "cerrad", "ejecut", "hech", "conclui"])
-    ):
-        return "Realizada"
-        
-    return "Realizada" if fecha_realizada else "Pendiente"
-
-
-@app.post("/api/visitas/bulk", tags=["Visitas"])
-def carga_masiva_visitas(lista: List[Dict[str, Any]], replace: bool = False):
-    """Carga masiva de visitas con auto-clasificación de categoría, resolución de RBD por nombre y mapeo No Realizada -> Pendiente."""
-    conn = get_db_connection()
-    insertados = 0
-    actualizados = 0
-
-    if replace:
-        conn.execute("DELETE FROM visitas")
-        conn.commit()
-
-    # Cargar catálogo de establecimientos para matching por nombre
-    colegios_db = conn.execute("SELECT rbd, nombre, comuna, director, correo_director FROM establecimientos").fetchall()
-    colegios_index = []
-    for c in colegios_db:
-        norm_str, tokens = normalizar_texto_colegio(c["nombre"])
-        colegios_index.append({
-            "rbd": c["rbd"],
-            "nombre": c["nombre"],
-            "comuna": c["comuna"],
-            "norm_str": norm_str,
-            "tokens": tokens
-        })
-
-    def resolver_rbd_por_nombre(nom_busqueda: str):
-        if not nom_busqueda:
-            return None
-        q_str, q_tokens = normalizar_texto_colegio(nom_busqueda)
-        if not q_tokens:
-            return None
-        # 1. Coincidencia directa o contenida
-        for c in colegios_index:
-            if q_str and (q_str == c["norm_str"] or q_str in c["norm_str"] or c["norm_str"] in q_str):
-                return c["rbd"]
-        # 2. Mayor solapamiento de palabras
-        mejor_rbd = None
-        mejor_score = 0.0
-        for c in colegios_index:
-            if not c["tokens"]:
-                continue
-            inter = q_tokens.intersection(c["tokens"])
-            score = len(inter) / max(len(q_tokens), 1)
-            if score > mejor_score and score >= 0.45:
-                mejor_score = score
-                mejor_rbd = c["rbd"]
-        return mejor_rbd
-
-    for item in lista:
-        rbd = int(item.get("rbd") or 0)
-        nombre_est = item.get("establecimiento_nombre") or item.get("nombre") or item.get("colegio") or ""
-        
-        # Si no viene RBD, intentar resolverlo por el nombre del colegio
-        if not rbd and nombre_est:
-            rbd_resuelto = resolver_rbd_por_nombre(nombre_est)
-            if rbd_resuelto:
-                rbd = rbd_resuelto
-
-        # Si aún no tiene RBD pero tiene nombre, generar un RBD nuevo para el establecimiento
-        if not rbd:
-            if nombre_est:
-                max_rbd = conn.execute("SELECT COALESCE(MAX(rbd), 9000) FROM establecimientos").fetchone()[0]
-                rbd = max(max_rbd + 1, 9001)
-                conn.execute(
-                    "INSERT INTO establecimientos (rbd, nombre, comuna, director, correo_director, activo) VALUES (?, ?, 'Regional', 'Director(a)', 'contacto@educacion.cl', 1)",
-                    (rbd, nombre_est)
-                )
-                colegios_index.append({
-                    "rbd": rbd,
-                    "nombre": nombre_est,
-                    "comuna": "Regional",
-                    "norm_str": normalizar_texto_colegio(nombre_est)[0],
-                    "tokens": normalizar_texto_colegio(nombre_est)[1]
-                })
-            else:
-                continue
-            
-        # Asegurar que el colegio existe en la tabla de establecimientos
-        est = conn.execute("SELECT rbd FROM establecimientos WHERE rbd = ?", (rbd,)).fetchone()
-        if not est:
-            conn.execute(
-                "INSERT INTO establecimientos (rbd, nombre, comuna, director, correo_director, activo) VALUES (?, ?, 'Regional', 'Director(a)', 'contacto@educacion.cl', 1)",
-                (rbd, nombre_est or f"Establecimiento RBD {rbd}")
-            )
-
-        tecnico = item.get("tecnico_responsable") or "Sebastian Guevara"
-        
-        # Manejo de fechas de solicitud y realización/atención
-        fecha_solicitud = item.get("fecha_solicitud") or item.get("fecha_programada") or item.get("fecha") or datetime.now().strftime("%Y-%m-%d")
-        fecha_atencion = item.get("fecha_atencion") or item.get("fecha_realizada") or item.get("fecha_ejecucion") or None
-
-        # Normalización de estado (Mapea 'No Realizado', 'No', etc. -> 'Pendiente')
-        raw_estado = (
-            item.get("estado") or item.get("Estado") or
-            item.get("realizado") or item.get("Realizado") or
-            item.get("realizada") or item.get("Realizada") or
-            item.get("estado_visita") or item.get("Estado Visita") or
-            item.get("no_realizado") or item.get("No Realizado") or
-            item.get("situacion") or item.get("Situacion") or
-            None
-        )
-        estado = normalizar_estado_visita(raw_estado, fecha_atencion)
-        if estado == "Pendiente":
-            fecha_atencion = None
-        elif estado == "Realizada" and not fecha_atencion:
-            fecha_atencion = f"{fecha_solicitud} 17:00:00"
-
-        motivo = item.get("motivo") or item.get("detalle") or "Atención técnica a requerimiento del establecimiento"
-        
-        # Inferencia automática de tipo_soporte si no viene asignado o es genérico
-        tipo_soporte = item.get("tipo_soporte")
-        if not tipo_soporte or tipo_soporte.strip() in ("", "Soporte", "General", "Otro"):
-            tipo_soporte = inferir_categoria_soporte(motivo)
-
-        prioridad = item.get("prioridad") or "Media"
-        if prioridad not in ('Baja', 'Media', 'Alta', 'Urgente'):
-            prioridad = "Media"
-
-        obs = item.get("observaciones_cierre") or item.get("solucion") or None
-        if estado == "Pendiente" and not obs:
-            obs = "Visita técnica pendiente de atención / No realizada."
-        elif estado == "Realizada" and not obs:
-            obs = "Trabajo concluido conforme a requerimiento institucional."
-
-        firma = item.get("firma_recepcion") if estado == "Realizada" else None
-
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO visitas (
-                rbd, tecnico_responsable, estado, tipo_soporte, prioridad,
-                fecha_solicitud, fecha_atencion, fecha_programada, fecha_realizada,
-                motivo, detalle_hardware, seguimiento_bitacora, observaciones_cierre, firma_recepcion
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (rbd, tecnico, estado, tipo_soporte, prioridad, fecha_solicitud, fecha_atencion, fecha_solicitud, fecha_atencion, motivo, None, None, obs, firma)
-        )
-        insertados += 1
-
-    conn.commit()
-    conn.close()
-    return {"status": "ok", "insertados": insertados, "total": len(lista)}
 
 
 @app.put("/api/visitas/{visita_id}", response_model=VisitaResponse, tags=["Visitas"])
 def actualizar_visita(visita_id: int, datos: VisitaUpdate):
     """Actualiza los datos, estado u observaciones de una visita técnica."""
-    conn = get_db_connection()
-    actual = conn.execute("SELECT * FROM visitas WHERE id = ?", (visita_id,)).fetchone()
+    actual = db.query_one("SELECT * FROM visitas WHERE id = ?", (visita_id,))
     if not actual:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"Visita con ID {visita_id} no encontrada.")
 
     if datos.rbd is not None:
-        est = conn.execute("SELECT rbd FROM establecimientos WHERE rbd = ?", (datos.rbd,)).fetchone()
+        est = db.query_one("SELECT rbd FROM establecimientos WHERE rbd = ?", (datos.rbd,))
         if not est:
-            conn.close()
             raise HTTPException(status_code=400, detail=f"El establecimiento con RBD {datos.rbd} no existe.")
 
     datos_dict = datos.dict(exclude_unset=True)
@@ -963,26 +618,22 @@ def actualizar_visita(visita_id: int, datos: VisitaUpdate):
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
         query = f"UPDATE visitas SET {', '.join(update_fields)} WHERE id = ?"
         params.append(visita_id)
-        conn.execute(query, params)
-        conn.commit()
+        db.execute(query, params)
 
-    conn.close()
     return obtener_visita(visita_id)
 
 
 @app.post("/api/visitas/{visita_id}/seguimiento", response_model=VisitaResponse, tags=["Visitas"])
 def agregar_nota_seguimiento(visita_id: int, nota: NotaBitacora):
     """Agrega una nota cronológica a la bitácora de seguimiento de la visita."""
-    conn = get_db_connection()
-    row = conn.execute("SELECT seguimiento_bitacora FROM visitas WHERE id = ?", (visita_id,)).fetchone()
+    row = db.query_one("SELECT seguimiento_bitacora FROM visitas WHERE id = ?", (visita_id,))
     if not row:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"Visita con ID {visita_id} no encontrada.")
 
     bitacora = []
     if row["seguimiento_bitacora"]:
         try:
-            bitacora = json.loads(row["seguimiento_bitacora"])
+            bitacora = json.loads(row["seguimiento_bitacora"]) if isinstance(row["seguimiento_bitacora"], str) else row["seguimiento_bitacora"]
         except Exception:
             bitacora = []
 
@@ -992,17 +643,18 @@ def agregar_nota_seguimiento(visita_id: int, nota: NotaBitacora):
         "nota": nota.nota
     })
 
-    conn.execute("UPDATE visitas SET seguimiento_bitacora = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(bitacora), visita_id))
-    conn.commit()
-    conn.close()
+    db.execute(
+        "UPDATE visitas SET seguimiento_bitacora = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (json.dumps(bitacora), visita_id)
+    )
 
     return obtener_visita(visita_id)
 
 
 class EnvioCorreoRequest(BaseModel):
-    destinatario: Optional[str] = Field(None, description="Correo destino (por defecto el del establecimiento o director)")
+    destinatario: Optional[str] = Field(None, description="Correo destino")
     destinatario_cc: Optional[str] = Field(None, description="Correo copia (opcional)")
-    mensaje_adicional: Optional[str] = Field(None, description="Nota o indicación complementaria para el correo")
+    mensaje_adicional: Optional[str] = Field(None, description="Nota complementaria")
 
 
 class EnvioCorreoResponse(BaseModel):
@@ -1026,12 +678,11 @@ def enviar_correo_visita(visita_id: int, req: Optional[EnvioCorreoRequest] = Non
     if not visita_data:
         raise HTTPException(status_code=404, detail=f"Visita con ID {visita_id} no encontrada.")
 
-    # Determinar correo destinatario
     destinatario = (req.destinatario if req and req.destinatario else None) or visita_data.get("correo_establecimiento") or visita_data.get("correo_director")
     if not destinatario:
         raise HTTPException(
             status_code=400,
-            detail=f"El establecimiento {visita_data.get('establecimiento_nombre')} (RBD {visita_data.get('rbd')}) no tiene registrado un correo electrónico institucional ni del director."
+            detail=f"El establecimiento {visita_data.get('establecimiento_nombre')} (RBD {visita_data.get('rbd')}) no tiene registrado un correo institucional ni del director."
         )
 
     dest_cc = (req.destinatario_cc if req and req.destinatario_cc else None) or (visita_data.get("correo_director") if visita_data.get("correo_establecimiento") and visita_data.get("correo_director") != visita_data.get("correo_establecimiento") else None)
@@ -1043,7 +694,6 @@ def enviar_correo_visita(visita_id: int, req: Optional[EnvioCorreoRequest] = Non
     f_sol = visita_data.get('fecha_solicitud') or visita_data.get('fecha_programada') or 'No especificada'
     f_ate = visita_data.get('fecha_atencion') or visita_data.get('fecha_realizada')
 
-    # Construir cuerpo en texto plano
     cuerpo_texto = f"""Estimado(a) Director(a) / Encargado(a) TI de {visita_data.get('establecimiento_nombre')}:
 
 Se ha registrado exitosamente una visita técnica de Soporte TI para su establecimiento.
@@ -1053,7 +703,7 @@ Se ha registrado exitosamente una visita técnica de Soporte TI para su establec
 =======================================================
 • ID de Atención / Orden: {id_atencion} (Registro #{visita_id})
 • Establecimiento: {visita_data.get('establecimiento_nombre')} (RBD: {visita_data.get('rbd')})
-• Comuna: {visita_data.get('establecimiento_comuna', 'Regional')}
+• Comuna: {visita_data.get('establecimiento_comuna', 'Valle Diguillín')}
 • Técnico Responsable Asignado: {visita_data.get('tecnico_responsable')}
 • Fecha de Solicitud: {f_sol}
 {f'• Fecha de Atención: {f_ate}' if f_ate else ''}
@@ -1066,14 +716,12 @@ Se ha registrado exitosamente una visita técnica de Soporte TI para su establec
 {f'• Observaciones Adicionales: {mensaje_extra}' if mensaje_extra else ''}
 =======================================================
 
-Por favor conserve este ID de Atención ({id_atencion}) para cualquier consulta, seguimiento o recepción técnica del servicio.
+Por favor conserve este ID de Atención ({id_atencion}) para cualquier consulta o recepción técnica conforme.
 
 Atentamente,
-Unidad de Soporte e Infraestructura Tecnológica
-Plataforma de Gestión de Visitas TI
+Unidad de Soporte e Infraestructura Tecnológica - SLEP Valle Diguillín
 """
 
-    # Construir cuerpo en formato HTML profesional
     cuerpo_html = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1106,7 +754,7 @@ Plataforma de Gestión de Visitas TI
 
       <div class="box">
         <div class="row"><span class="label">Establecimiento:</span><span class="value">{visita_data.get('establecimiento_nombre')} (RBD: {visita_data.get('rbd')})</span></div>
-        <div class="row"><span class="label">Comuna:</span><span class="value">{visita_data.get('establecimiento_comuna', 'Regional')}</span></div>
+        <div class="row"><span class="label">Comuna:</span><span class="value">{visita_data.get('establecimiento_comuna', 'Valle Diguillín')}</span></div>
         <div class="row"><span class="label">Técnico Asignado:</span><span class="value" style="color:#2563eb;">{visita_data.get('tecnico_responsable')}</span></div>
         <div class="row"><span class="label">Fecha de Solicitud:</span><span class="value">{f_sol}</span></div>
         {f'<div class="row"><span class="label">Fecha de Atención:</span><span class="value" style="color:#059669;">{f_ate}</span></div>' if f_ate else ''}
@@ -1126,20 +774,19 @@ Plataforma de Gestión de Visitas TI
       </p>
     </div>
     <div class="footer">
-      Unidad de Soporte TI &bull; Plataforma Regional de Gestión Técnica Educacional
+      Unidad de Soporte TI &bull; SLEP Valle Diguillín
     </div>
   </div>
 </body>
 </html>
 """
 
-    # Registro en la bitácora de seguimiento
-    conn = get_db_connection()
-    row = conn.execute("SELECT seguimiento_bitacora FROM visitas WHERE id = ?", (visita_id,)).fetchone()
+    # Registrar en bitácora
+    row = db.query_one("SELECT seguimiento_bitacora FROM visitas WHERE id = ?", (visita_id,))
     bitacora = []
     if row and row["seguimiento_bitacora"]:
         try:
-            bitacora = json.loads(row["seguimiento_bitacora"])
+            bitacora = json.loads(row["seguimiento_bitacora"]) if isinstance(row["seguimiento_bitacora"], str) else row["seguimiento_bitacora"]
         except Exception:
             bitacora = []
 
@@ -1150,14 +797,12 @@ Plataforma de Gestión de Visitas TI
     }
     bitacora.append(nota_envio)
 
-    conn.execute(
+    db.execute(
         "UPDATE visitas SET seguimiento_bitacora = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (json.dumps(bitacora), visita_id)
     )
-    conn.commit()
-    conn.close()
 
-    # Opcional: Intentar envío SMTP si está configurado en el entorno
+    # Intento de envío SMTP si está configurado
     smtp_server = os.getenv("SMTP_SERVER")
     if smtp_server:
         try:
@@ -1190,7 +835,7 @@ Plataforma de Gestión de Visitas TI
                     server.login(smtp_user, smtp_pass)
                 server.sendmail(remitente, recipients, msg.as_string())
         except Exception as e:
-            print(f"[SMTP WARNING] No se pudo enviar vía servidor SMTP ({e}). Se entrega respuesta simulada/local.")
+            print(f"[SMTP WARNING] Envío SMTP: {e}")
 
     visita_actualizada = obtener_visita(visita_id)
     return {
@@ -1211,64 +856,36 @@ Plataforma de Gestión de Visitas TI
 @app.delete("/api/visitas/{visita_id}", status_code=status.HTTP_200_OK, tags=["Visitas"])
 def eliminar_visita(visita_id: int):
     """Elimina un registro de visita técnica."""
-    conn = get_db_connection()
-    res = conn.execute("DELETE FROM visitas WHERE id = ?", (visita_id,))
-    conn.commit()
-    conn.close()
-    if res.rowcount == 0:
+    res = db.execute("DELETE FROM visitas WHERE id = ?", (visita_id,))
+    if res == 0:
         raise HTTPException(status_code=404, detail=f"Visita con ID {visita_id} no encontrada.")
     return {"message": f"Visita #{visita_id} eliminada correctamente."}
 
 
-@app.get("/api/admin/recargar-datos", tags=["Administración"])
-@app.post("/api/admin/recargar-datos", tags=["Administración"])
-def recargar_datos_semilla():
-    """Recarga y sincroniza la base de datos completa con los 136 establecimientos y 180 visitas oficiales."""
-    conn = get_db_connection()
-    if os.path.exists(SEEDS_PATH):
-        with open(SEEDS_PATH, "r", encoding="utf-8") as f:
-            conn.executescript(f.read())
-        conn.commit()
-    total_est = conn.execute("SELECT COUNT(*) FROM establecimientos").fetchone()[0]
-    total_vis = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
-    conn.close()
-    return {
-        "status": "success",
-        "mensaje": f"Base de datos sincronizada con éxito: {total_est} establecimientos y {total_vis} visitas cargadas.",
-        "establecimientos": total_est,
-        "visitas": total_vis
-    }
-
-
-# 3. DASHBOARD Y MÉTRICAS AGREGADAS
+# --- 3. DASHBOARD Y MÉTRICAS AGREGADAS ---
 
 @app.get("/api/dashboard/stats", tags=["Dashboard"])
 def metricas_dashboard():
     """Provee todas las estadísticas, KPIs y agrupaciones para el Dashboard en tiempo real."""
-    conn = get_db_connection()
+    total_visitas = db.query_one("SELECT COUNT(*) as c FROM visitas")["c"]
+    pendientes = db.query_one("SELECT COUNT(*) as c FROM visitas WHERE estado = 'Pendiente'")["c"]
+    en_proceso = db.query_one("SELECT COUNT(*) as c FROM visitas WHERE estado = 'En Proceso'")["c"]
+    realizadas = db.query_one("SELECT COUNT(*) as c FROM visitas WHERE estado = 'Realizada'")["c"]
+    programadas = db.query_one("SELECT COUNT(*) as c FROM visitas WHERE estado = 'Programada'")["c"]
+    total_establecimientos = db.query_one("SELECT COUNT(*) as c FROM establecimientos WHERE activo = 1")["c"]
 
-    total_visitas = conn.execute("SELECT COUNT(*) FROM visitas").fetchone()[0]
-    pendientes = conn.execute("SELECT COUNT(*) FROM visitas WHERE estado = 'Pendiente'").fetchone()[0]
-    en_proceso = conn.execute("SELECT COUNT(*) FROM visitas WHERE estado = 'En Proceso'").fetchone()[0]
-    realizadas = conn.execute("SELECT COUNT(*) FROM visitas WHERE estado = 'Realizada'").fetchone()[0]
-    programadas = conn.execute("SELECT COUNT(*) FROM visitas WHERE estado = 'Programada'").fetchone()[0]
-    total_establecimientos = conn.execute("SELECT COUNT(*) FROM establecimientos WHERE activo = 1").fetchone()[0]
-
-    # Tasa de resolución (%)
     tasa_resolucion = round((realizadas / total_visitas * 100), 1) if total_visitas > 0 else 0.0
 
-    # Distribución por tipo de soporte
-    por_tipo = conn.execute(
+    por_tipo = db.query(
         """
         SELECT COALESCE(tipo_soporte, 'General') as tipo, COUNT(*) as cantidad
         FROM visitas
         GROUP BY tipo
         ORDER BY cantidad DESC
         """
-    ).fetchall()
+    )
 
-    # Distribución por comuna
-    por_comuna = conn.execute(
+    por_comuna = db.query(
         """
         SELECT e.comuna, COUNT(v.id) as total_visitas,
                SUM(CASE WHEN v.estado = 'Realizada' THEN 1 ELSE 0 END) as realizadas,
@@ -1280,22 +897,20 @@ def metricas_dashboard():
         GROUP BY e.comuna
         ORDER BY total_visitas DESC
         """
-    ).fetchall()
+    )
 
-    # Top establecimientos atendidos
-    top_establecimientos = conn.execute(
+    top_establecimientos = db.query(
         """
         SELECT e.rbd, e.nombre, e.comuna, COUNT(v.id) as total_atenciones
         FROM establecimientos e
         JOIN visitas v ON e.rbd = v.rbd
-        GROUP BY e.rbd
+        GROUP BY e.rbd, e.nombre, e.comuna
         ORDER BY total_atenciones DESC
         LIMIT 5
         """
-    ).fetchall()
+    )
 
-    # Próximas visitas o pendientes críticas
-    proximas = conn.execute(
+    proximas = db.query(
         """
         SELECT v.id, 
                COALESCE(v.fecha_solicitud, v.fecha_programada) as fecha_solicitud,
@@ -1311,9 +926,7 @@ def metricas_dashboard():
             COALESCE(v.fecha_solicitud, v.fecha_programada) ASC
         LIMIT 6
         """
-    ).fetchall()
-
-    conn.close()
+    )
 
     return {
         "kpis": {
@@ -1325,14 +938,14 @@ def metricas_dashboard():
             "total_establecimientos": total_establecimientos,
             "tasa_resolucion": tasa_resolucion
         },
-        "por_tipo": [dict(r) for r in por_tipo],
-        "por_comuna": [dict(r) for r in por_comuna],
-        "top_establecimientos": [dict(r) for r in top_establecimientos],
-        "proximas_visitas": [dict(r) for r in proximas]
+        "por_tipo": por_tipo,
+        "por_comuna": por_comuna,
+        "top_establecimientos": top_establecimientos,
+        "proximas_visitas": proximas
     }
 
 
-# Servir Frontend Estático si existe la carpeta
+# Servir Frontend Estático
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
@@ -1371,19 +984,21 @@ if __name__ == "__main__":
     if env_port:
         port = int(env_port)
     else:
-        # En Windows el puerto 8000 puede estar reservado por el sistema/Hyper-V (WinError 10013)
-        if is_port_free(8000):
-            port = 8000
-        elif is_port_free(8080):
+        if is_port_free(8080):
             port = 8080
+        elif is_port_free(8000):
+            port = 8000
         else:
             port = 8001
 
-    print("=" * 65)
-    print("   TI SLEP VALLE DIGUILLIN - SISTEMA DE VISITAS Y SOPORTE")
-    print("=" * 65)
-    print(f"  * Servidor Web y API: http://localhost:{port}")
-    print(f"  * Documentacion Swagger: http://localhost:{port}/docs")
-    print("=" * 65)
+    st = db.get_status()
+    print("=" * 68)
+    print("   SISTEMA DE VISITAS Y SOPORTE TI - SLEP VALLE DIGUILLÍN")
+    print("=" * 68)
+    print(f"  * Motor de Base de Datos : {st.get('engine_display')}")
+    print(f"  * Total Colegios Activos : {st.get('establecimientos_count')}")
+    print(f"  * Total Visitas Técnicas : {st.get('visitas_count')}")
+    print(f"  * Servidor Web y API     : http://localhost:{port}")
+    print(f"  * Documentación Swagger  : http://localhost:{port}/docs")
+    print("=" * 68)
     uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
-
